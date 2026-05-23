@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{broadcast, RwLock, Semaphore};
+use tokio::sync::{broadcast, watch, RwLock, Semaphore};
 use uuid::Uuid;
 
 const MAX_CONCURRENT_JOBS: usize = 8;
@@ -39,9 +39,12 @@ pub struct Job {
     pub command: String,
     // Lignes déjà produites (pour les clients qui se connectent en retard)
     pub lines:   Arc<RwLock<Vec<String>>>,
-    // Canal broadcast pour les lignes nouvelles
+    // Canal broadcast pour les lignes nouvelles (vrai temps réel)
     pub tx:      broadcast::Sender<String>,
     pub status:  Arc<RwLock<JobStatus>>,
+    // Signal de fin : watch::Sender<bool> — envoie true quand le job se termine.
+    // Les clients SSE s'abonnent via job.done.subscribe() pour éviter le polling.
+    pub done:    watch::Sender<bool>,
     // Handle d'annulation de la task qui supervise le subprocess.
     // L'abandon de la task libère le `Child` (kill_on_drop) → le process est tué.
     pub abort:   RwLock<Option<tokio::task::AbortHandle>>,
@@ -49,13 +52,15 @@ pub struct Job {
 
 impl Job {
     pub fn new(id: Uuid, command: impl Into<String>) -> Self {
-        let (tx, _) = broadcast::channel(256);
+        let (tx, _)   = broadcast::channel(256);
+        let (done, _) = watch::channel(false);
         Self {
             id,
             command: command.into(),
             lines:   Arc::new(RwLock::new(Vec::new())),
             tx,
             status:  Arc::new(RwLock::new(JobStatus::Running)),
+            done,
             abort:   RwLock::new(None),
         }
     }
@@ -202,6 +207,7 @@ impl JobManager {
                         _ => JobStatus::Failed,
                     };
                     *job_inner.status.write().await = final_status;
+                    let _ = job_inner.done.send(true);
                 },
             )
             .await;
@@ -215,6 +221,7 @@ impl JobManager {
                     ))
                     .await;
                 *job_clone.status.write().await = JobStatus::Failed;
+                let _ = job_clone.done.send(true);
             }
 
             // Nettoyer les vieux jobs terminés après 10 min
