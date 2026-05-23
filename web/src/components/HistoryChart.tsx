@@ -1,5 +1,5 @@
 import {
-  ComposedChart, BarChart, Line, Bar, XAxis, YAxis, Tooltip,
+  ComposedChart, BarChart, Line, Bar, Cell, XAxis, YAxis, Tooltip,
   CartesianGrid, Legend, ResponsiveContainer, ReferenceArea,
 } from 'recharts'
 import type { RunJson, HourStatJson } from '../api'
@@ -83,7 +83,7 @@ export function HourChart({ hours }: HourProps) {
           />
           <Bar dataKey="bad_pct" name="% dégradé" radius={2}>
             {all.map((d, i) => (
-              <rect key={i} fill={barColor(d.bad_pct)} />
+              <Cell key={i} fill={barColor(d.bad_pct)} />
             ))}
           </Bar>
         </BarChart>

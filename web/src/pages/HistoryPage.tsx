@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import { fetchHistory, fetchByHour, fetchRunDetail, fmtTs } from '../api'
 import { VerdictBadge } from '../components/VerdictBadge'
 import { TrendChart, HourChart } from '../components/HistoryChart'
@@ -169,8 +169,8 @@ export function HistoryPage() {
                   </thead>
                   <tbody>
                     {runs.map((r, i) => (
-                      <>
-                        <tr key={r.id}
+                      <Fragment key={r.id}>
+                        <tr
                           className="transition-colors cursor-pointer"
                           style={{
                             background: openId === r.id ? 'rgba(37,99,235,0.08)' : i % 2 === 0 ? '#0a1020' : '#0c1428',
@@ -198,7 +198,7 @@ export function HistoryPage() {
                         </tr>
 
                         {openId === r.id && (
-                          <tr key={`d-${r.id}`}>
+                          <tr>
                             <td colSpan={9} style={{ background: '#080e1c', borderBottom: '1px solid rgba(37,99,235,0.2)' }}
                               className="px-6 py-4">
                               {detailLoading && (
@@ -229,7 +229,7 @@ export function HistoryPage() {
                             </td>
                           </tr>
                         )}
-                      </>
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
