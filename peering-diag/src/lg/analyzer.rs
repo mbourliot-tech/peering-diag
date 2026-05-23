@@ -317,7 +317,7 @@ fn check_latency(hops: &[MtrHop], icmp_rl: &[bool]) -> Vec<Finding> {
                     (65536.0 * 8.0) / (rtt / 1000.0) / 1_000_000.0
                 ),
                 action: Some(format!(
-                    "Utiliser plusieurs connexions FTP parallèles pour compenser \
+                    "Utiliser plusieurs connexions parallèles pour compenser \
                      la limite BDP ({:.0}ms RTT retour).",
                     rtt
                 )),
@@ -564,7 +564,7 @@ fn build_verdict(findings: &[Finding], hops: &[MtrHop]) -> Verdict {
             } else if findings.iter().any(|f| f.category == FindingCategory::HighLatency) {
                 format!(
                     "Latence retour notable{}. \
-                     Utiliser plusieurs connexions FTP parallèles pour maximiser le débit entrant.",
+                     Utiliser plusieurs connexions parallèles pour maximiser le débit entrant.",
                     rtt_str
                 )
             } else {

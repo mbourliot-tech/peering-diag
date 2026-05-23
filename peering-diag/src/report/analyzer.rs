@@ -238,7 +238,7 @@ fn check_bufferbloat(hops: &[Hop]) -> Vec<Finding> {
                 min, max
             ),
             action: Some(
-                "Symptôme de surcharge réseau. Le débit FTP sera instable \
+                "Symptôme de surcharge réseau. Le débit sera instable \
                  pendant les périodes de forte utilisation.".to_string()
             ),
         });
@@ -289,7 +289,7 @@ fn check_latency(hops: &[Hop]) -> Vec<Finding> {
                         rtt, threshold_crit, label
                     ),
                     action: Some(
-                        "Latence trop élevée pour un transfert FTP efficace. \
+                        "Latence trop élevée pour un transfert efficace. \
                          Vérifier le routage et envisager un serveur relais géographiquement plus proche.".to_string()
                     ),
                 });
@@ -304,7 +304,7 @@ fn check_latency(hops: &[Hop]) -> Vec<Finding> {
                         rtt, threshold_warn, label
                     ),
                     action: Some(format!(
-                        "Avec {:.0}ms de RTT, une connexion FTP simple est limitée à ~{:.0} Mbps \
+                        "Avec {:.0}ms de RTT, une connexion TCP simple est limitée à ~{:.0} Mbps \
                          (fenêtre TCP 64KB). Utiliser plusieurs connexions parallèles pour compenser.",
                         rtt,
                         (65536.0 * 8.0) / (rtt / 1000.0) / 1_000_000.0
@@ -533,7 +533,7 @@ fn check_speedtest_drop(speedtests: &[SpeedtestResult]) -> Vec<Finding> {
                 ),
                 evidence: format!(
                     "{:.1} Mbps mesuré vers {} (AS{}). \
-                     En dessous de 10 Mbps, les transferts FTP seront très lents.",
+                     En dessous de 10 Mbps, les transferts seront très lents.",
                     cur.download_mbps,
                     cur.server_name,
                     cur.asn.unwrap_or(0)
@@ -609,7 +609,7 @@ fn build_verdict(findings: &[Finding], hops: &[Hop], speedtests: &[SpeedtestResu
                 )
             } else if has_packet_loss {
                 format!("Perte de paquets réelle détectée sur le chemin ({} hops). \
-                    Le transfert FTP sera dégradé et instable. \
+                    Les transferts seront dégradés et instables. \
                     Localiser le segment fautif et contacter l'opérateur responsable.",
                     hop_count
                 )
@@ -621,7 +621,7 @@ fn build_verdict(findings: &[Finding], hops: &[Hop], speedtests: &[SpeedtestResu
                 let rtt_str = target_rtt.map(|r| format!("{:.0}ms", r)).unwrap_or_default();
                 format!("Latence excessive vers la cible ({}). \
                     Le débit TCP sera limité par le BDP. \
-                    Utiliser des connexions FTP parallèles pour compenser.",
+                    Utiliser des connexions parallèles pour compenser.",
                     rtt_str
                 )
             } else {
