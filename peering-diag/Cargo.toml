@@ -2,8 +2,14 @@
 name = "peering-diag"
 version = "0.1.0"
 edition = "2021"
-description = "Outil de diagnostic de peering : MTR AS-aware + speedtest segmenté"
+description = "Outil de diagnostic de peering : MTR AS-aware, speedtest segmenté, chemin retour Globalping, historisation et interface web"
 authors = ["Michel"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/Michel/peering-diag"
+homepage = "https://github.com/Michel/peering-diag"
+keywords = ["network", "diagnostic", "mtr", "traceroute", "peering"]
+categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 # Async runtime
