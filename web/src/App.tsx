@@ -1,9 +1,12 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
-import { DiagPage }     from './pages/DiagPage'
-import { HistoryPage }  from './pages/HistoryPage'
-import { WatchPage }    from './pages/WatchPage'
-import { CheckEnvPage } from './pages/CheckEnvPage'
-import { DbPage }       from './pages/DbPage'
+
+// Chargement paresseux — chaque page devient un chunk séparé
+const DiagPage     = lazy(() => import('./pages/DiagPage').then(m => ({ default: m.DiagPage })))
+const HistoryPage  = lazy(() => import('./pages/HistoryPage').then(m => ({ default: m.HistoryPage })))
+const WatchPage    = lazy(() => import('./pages/WatchPage').then(m => ({ default: m.WatchPage })))
+const CheckEnvPage = lazy(() => import('./pages/CheckEnvPage').then(m => ({ default: m.CheckEnvPage })))
+const DbPage       = lazy(() => import('./pages/DbPage').then(m => ({ default: m.DbPage })))
 
 const NAV = [
   { to: '/diag',      icon: '🔬', label: 'Diagnostic' },
@@ -59,14 +62,21 @@ export default function App() {
 
         {/* ── Contenu ─────────────────────────────────────────────────────── */}
         <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8">
-          <Routes>
-            <Route path="/"          element={<Navigate to="/diag" replace />} />
-            <Route path="/diag"      element={<DiagPage />} />
-            <Route path="/history"   element={<HistoryPage />} />
-            <Route path="/watch"     element={<WatchPage />} />
-            <Route path="/check-env" element={<CheckEnvPage />} />
-            <Route path="/db"        element={<DbPage />} />
-          </Routes>
+          <Suspense fallback={
+            <div className="flex items-center justify-center py-20 text-slate-500 gap-3">
+              <span className="inline-block w-5 h-5 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+              Chargement…
+            </div>
+          }>
+            <Routes>
+              <Route path="/"          element={<Navigate to="/diag" replace />} />
+              <Route path="/diag"      element={<DiagPage />} />
+              <Route path="/history"   element={<HistoryPage />} />
+              <Route path="/watch"     element={<WatchPage />} />
+              <Route path="/check-env" element={<CheckEnvPage />} />
+              <Route path="/db"        element={<DbPage />} />
+            </Routes>
+          </Suspense>
         </main>
 
         {/* ── Footer ──────────────────────────────────────────────────────── */}

@@ -1,73 +1,64 @@
-# React + TypeScript + Vite
+# peering-diag — Interface web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Frontend React de l'interface web intégrée à `peering-diag serve`.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **React 19** + **TypeScript**
+- **Vite 8** (build + dev server)
+- **TailwindCSS v4** (styling)
+- **Recharts** (graphiques RTT, perte, tendance)
+- **react-router-dom v7** (navigation SPA)
 
-## React Compiler
+## Développement
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+# Installer les dépendances
+npm install
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+# Lancer le serveur de dev (proxy API → localhost:7373)
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Le backend doit tourner en parallèle :
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# Dans peering-diag/
+cargo run -- serve --db /tmp/dev.db
 ```
+
+## Build production
+
+```bash
+npm run build
+# → web/dist/  (servi par Axum via ServeDir)
+```
+
+## Structure
+
+```
+src/
+├── App.tsx              ← Router + layout principal
+├── api.ts               ← Fonctions fetch vers l'API backend
+├── pages/
+│   ├── DiagPage.tsx     ← Lancement de commandes + terminal SSE
+│   ├── HistoryPage.tsx  ← Historique des runs + graphiques
+│   ├── WatchPage.tsx    ← Sessions watch (démarrer/arrêter)
+│   ├── CheckEnvPage.tsx ← Vérification de l'environnement
+│   └── DbPage.tsx       ← Maintenance de la base SQLite
+└── components/
+    ├── TerminalOutput.tsx ← Affichage streaming SSE (style terminal)
+    ├── HopChart.tsx       ← Graphiques RTT et perte par hop
+    ├── HistoryChart.tsx   ← Tendance RTT/perte + pattern par heure
+    └── VerdictBadge.tsx   ← Badge coloré Healthy/Degraded/Faulty
+```
+
+## Chunking
+
+Le bundle est découpé en 3 chunks distincts pour optimiser le cache navigateur :
+
+| Chunk | Contenu | Taille gzip |
+|-------|---------|-------------|
+| `vendor-react` | react + react-dom + react-router-dom | 71 kB |
+| `vendor-charts` | recharts | 111 kB |
+| pages (x5) | DiagPage, HistoryPage… | 1–3 kB chacune |

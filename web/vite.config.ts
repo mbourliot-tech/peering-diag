@@ -11,5 +11,13 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('recharts')) return 'vendor-charts'
+          if (id.includes('react') || id.includes('react-router')) return 'vendor-react'
+        },
+      },
+    },
   },
 })
