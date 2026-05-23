@@ -53,8 +53,8 @@ export function DiagPage() {
     }
   }
 
-  // Seules ces commandes stockent des hops MTR exploitables
-  const HOP_COMMANDS = ['diag', 'aller', 'mtr']
+  // Seules ces commandes stockent des hops MTR en base → graphiques disponibles
+  const HOP_COMMANDS = ['diag', 'aller']
 
   async function handleDone() {
     setRunning(false)
