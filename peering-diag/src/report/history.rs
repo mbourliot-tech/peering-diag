@@ -192,6 +192,85 @@ fn fetch_runs(
     Ok(result)
 }
 
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── hour_from_ts ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_hour_from_ts_standard() {
+        assert_eq!(hour_from_ts("2024-01-15T14:30:00Z"), 14);
+        assert_eq!(hour_from_ts("2024-01-15T00:00:00Z"), 0);
+        assert_eq!(hour_from_ts("2024-01-15T23:59:59Z"), 23);
+    }
+
+    #[test]
+    fn test_hour_from_ts_malformed_returns_zero() {
+        assert_eq!(hour_from_ts(""), 0);
+        assert_eq!(hour_from_ts("no-separator"), 0);
+        assert_eq!(hour_from_ts("2024-01-15Txx:00:00Z"), 0);
+    }
+
+    // ── extract_from_json ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_extract_healthy_no_findings() {
+        let json = r#"{"verdict":{"status":"Healthy"},"findings":[]}"#;
+        let (verdict, finding) = extract_from_json(json);
+        assert_eq!(verdict, "Healthy");
+        assert_eq!(finding, "—");
+    }
+
+    #[test]
+    fn test_extract_faulty_with_critical_finding() {
+        let json = r#"{
+            "verdict": {"status": "Faulty"},
+            "findings": [
+                {"severity": "Info", "description": "info"},
+                {"severity": "Critical", "description": "Haute perte de paquets"}
+            ]
+        }"#;
+        let (verdict, finding) = extract_from_json(json);
+        assert_eq!(verdict, "Faulty");
+        assert_eq!(finding, "Haute perte de paquets");
+    }
+
+    #[test]
+    fn test_extract_picks_first_critical_or_warning() {
+        let json = r#"{
+            "verdict": {"status": "Degraded"},
+            "findings": [
+                {"severity": "Warning", "description": "Premier warning"},
+                {"severity": "Critical", "description": "Critical après"}
+            ]
+        }"#;
+        let (verdict, finding) = extract_from_json(json);
+        assert_eq!(verdict, "Degraded");
+        // find() retourne le premier match (Warning ici, avant Critical)
+        assert_eq!(finding, "Premier warning");
+    }
+
+    #[test]
+    fn test_extract_ignores_info_findings() {
+        let json = r#"{
+            "verdict": {"status": "Healthy"},
+            "findings": [{"severity": "Info", "description": "info only"}]
+        }"#;
+        let (_, finding) = extract_from_json(json);
+        assert_eq!(finding, "—");
+    }
+
+    #[test]
+    fn test_extract_invalid_json_returns_defaults() {
+        let (verdict, finding) = extract_from_json("not json at all");
+        assert_eq!(verdict, "?");
+        assert_eq!(finding, "—");
+    }
+}
+
 // ─── Vue chronologique ────────────────────────────────────────────────────────
 
 /// Affiche la liste des N derniers runs avec leurs métriques clés.

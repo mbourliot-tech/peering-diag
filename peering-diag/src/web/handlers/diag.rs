@@ -152,6 +152,7 @@ pub async fn job_stream_handler(
 
 // ─── Erreurs ─────────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub enum AppError {
     NotFound,
     BadRequest(String),
@@ -172,5 +173,99 @@ impl IntoResponse for AppError {
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
         AppError::Internal(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn json_args(pairs: &[(&str, serde_json::Value)]) -> HashMap<String, serde_json::Value> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    #[test]
+    fn test_valid_command_with_target() {
+        let cli = build_args("diag", &json_args(&[("target", serde_json::json!("8.8.8.8"))])).unwrap();
+        assert_eq!(cli[0], "diag");
+        assert_eq!(cli[1], "8.8.8.8");
+    }
+
+    #[test]
+    fn test_unknown_command_rejected() {
+        let err = build_args("rm", &json_args(&[])).unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn test_target_starting_with_dash_rejected() {
+        let err = build_args("diag", &json_args(&[("target", serde_json::json!("-bad"))])).unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn test_target_too_long_rejected() {
+        let long_target = "a".repeat(254);
+        let err = build_args("diag", &json_args(&[("target", serde_json::json!(long_target))])).unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn test_target_at_max_length_accepted() {
+        let max_target = "a".repeat(253);
+        let cli = build_args("diag", &json_args(&[("target", serde_json::json!(max_target))])).unwrap();
+        assert_eq!(cli[1].len(), 253);
+    }
+
+    #[test]
+    fn test_boolean_flags_true_included() {
+        let cli = build_args("diag", &json_args(&[
+            ("target", serde_json::json!("1.1.1.1")),
+            ("no_speedtest", serde_json::json!(true)),
+            ("quiet", serde_json::json!(true)),
+        ])).unwrap();
+        assert!(cli.contains(&"--no-speedtest".to_string()));
+        assert!(cli.contains(&"--quiet".to_string()));
+    }
+
+    #[test]
+    fn test_boolean_flag_false_not_included() {
+        let cli = build_args("diag", &json_args(&[
+            ("target", serde_json::json!("1.1.1.1")),
+            ("no_speedtest", serde_json::json!(false)),
+        ])).unwrap();
+        assert!(!cli.contains(&"--no-speedtest".to_string()));
+    }
+
+    #[test]
+    fn test_integer_params_underscore_to_dash() {
+        let cli = build_args("mtr", &json_args(&[
+            ("target", serde_json::json!("8.8.8.8")),
+            ("max_hops", serde_json::json!(30)),
+            ("rounds", serde_json::json!(5)),
+        ])).unwrap();
+        assert!(cli.contains(&"--max-hops".to_string()));
+        assert!(cli.contains(&"30".to_string()));
+        assert!(cli.contains(&"--rounds".to_string()));
+        assert!(cli.contains(&"5".to_string()));
+    }
+
+    #[test]
+    fn test_string_params() {
+        let cli = build_args("lg", &json_args(&[
+            ("target", serde_json::json!("1.1.1.1")),
+            ("my_ip", serde_json::json!("192.168.1.1")),
+        ])).unwrap();
+        assert!(cli.contains(&"--my-ip".to_string()));
+        assert!(cli.contains(&"192.168.1.1".to_string()));
+    }
+
+    #[test]
+    fn test_check_env_ignores_all_args() {
+        let cli = build_args("check-env", &json_args(&[
+            ("target", serde_json::json!("anything")),
+            ("rounds", serde_json::json!(10)),
+        ])).unwrap();
+        assert_eq!(cli, vec!["check-env".to_string()]);
     }
 }

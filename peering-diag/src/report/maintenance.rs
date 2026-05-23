@@ -80,3 +80,128 @@ pub fn purge_keep_last(conn: &Connection, keep: usize) -> Result<i64> {
     )? as i64;
     Ok(deleted)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn setup_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE reports (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp    TEXT NOT NULL,
+                target       TEXT NOT NULL,
+                target_ip    TEXT NOT NULL,
+                target_asn   INTEGER,
+                as_name      TEXT,
+                payload_json TEXT NOT NULL
+            );
+            CREATE TABLE hop_samples (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE
+            );
+            CREATE TABLE speedtest_samples (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+                timestamp TEXT NOT NULL
+            );
+            CREATE TABLE watch_series (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at TEXT NOT NULL,
+                target     TEXT NOT NULL,
+                interval_s INTEGER NOT NULL
+            );
+            CREATE TABLE return_hop_samples (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+                ttl       INTEGER NOT NULL
+            );",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn insert_report(conn: &Connection, timestamp: &str) {
+        conn.execute(
+            "INSERT INTO reports (timestamp, target, target_ip, payload_json)
+             VALUES (?1, 'test.example.com', '1.2.3.4', '{}')",
+            rusqlite::params![timestamp],
+        )
+        .unwrap();
+    }
+
+    fn count_reports(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM reports", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn test_purge_keep_last_removes_excess() {
+        let conn = setup_db();
+        for i in 1..=5 {
+            insert_report(&conn, &format!("2024-01-{:02}T00:00:00Z", i));
+        }
+        let deleted = purge_keep_last(&conn, 2).unwrap();
+        assert_eq!(deleted, 3);
+        assert_eq!(count_reports(&conn), 2);
+    }
+
+    #[test]
+    fn test_purge_keep_last_noop_when_under_limit() {
+        let conn = setup_db();
+        insert_report(&conn, "2024-01-01T00:00:00Z");
+        insert_report(&conn, "2024-01-02T00:00:00Z");
+        let deleted = purge_keep_last(&conn, 5).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(count_reports(&conn), 2);
+    }
+
+    #[test]
+    fn test_purge_older_than_removes_old_records() {
+        let conn = setup_db();
+        insert_report(&conn, "2020-01-01T00:00:00Z");
+        insert_report(&conn, "2020-06-01T00:00:00Z");
+        let deleted = purge_older_than(&conn, 1).unwrap();
+        assert_eq!(deleted, 2);
+        assert_eq!(count_reports(&conn), 0);
+    }
+
+    #[test]
+    fn test_purge_older_than_keeps_recent_records() {
+        let conn = setup_db();
+        conn.execute(
+            "INSERT INTO reports (timestamp, target, target_ip, payload_json)
+             VALUES (datetime('now'), 'test.example.com', '1.2.3.4', '{}')",
+            [],
+        )
+        .unwrap();
+        let deleted = purge_older_than(&conn, 30).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(count_reports(&conn), 1);
+    }
+
+    #[test]
+    fn test_get_stats_empty_db() {
+        let conn = setup_db();
+        let stats = get_stats(&conn, Path::new(":memory:")).unwrap();
+        assert_eq!(stats.run_count, 0);
+        assert_eq!(stats.hop_count, 0);
+        assert_eq!(stats.speedtest_count, 0);
+        assert_eq!(stats.watch_series_count, 0);
+        assert!(stats.oldest_run.is_none());
+        assert!(stats.newest_run.is_none());
+    }
+
+    #[test]
+    fn test_get_stats_counts_correctly() {
+        let conn = setup_db();
+        insert_report(&conn, "2024-01-01T10:00:00Z");
+        insert_report(&conn, "2024-01-02T10:00:00Z");
+        let stats = get_stats(&conn, Path::new(":memory:")).unwrap();
+        assert_eq!(stats.run_count, 2);
+        assert_eq!(stats.oldest_run.as_deref(), Some("2024-01-01T10:00:00Z"));
+        assert_eq!(stats.newest_run.as_deref(), Some("2024-01-02T10:00:00Z"));
+    }
+}

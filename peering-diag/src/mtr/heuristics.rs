@@ -280,4 +280,91 @@ mod tests {
         let degradation = find_degradation(&hops).expect("should detect");
         assert_eq!(degradation.degradation_type, DegradationType::Congestion);
     }
+
+    #[test]
+    fn test_empty_slice_no_panic() {
+        let mut hops: Vec<Hop> = vec![];
+        flag_icmp_ratelimiting(&mut hops); // ne doit pas paniquer
+        assert!(find_degradation(&hops).is_none());
+    }
+
+    #[test]
+    fn test_single_hop_no_degradation() {
+        let hops = vec![make_hop_with_rtt(1, 100, 100, 10)];
+        assert!(find_degradation(&hops).is_none());
+    }
+
+    #[test]
+    fn test_stable_path_no_degradation() {
+        let hops = vec![
+            make_hop_with_rtt(1, 100, 100, 5),
+            make_hop_with_rtt(2, 100, 100, 8),
+            make_hop_with_rtt(3, 100, 100, 12),
+            make_hop_with_rtt(4, 100, 100, 15),
+        ];
+        assert!(find_degradation(&hops).is_none());
+    }
+
+    #[test]
+    fn test_pure_packet_loss_without_rtt_jump() {
+        // Perte propagée sans bond de RTT → PacketLoss (pas Congestion)
+        let mut hops = vec![
+            make_hop_with_rtt(1, 100, 100, 10),
+            make_hop_with_rtt(2, 100, 100, 12),
+            make_hop_with_rtt(3, 100, 50, 13),  // 50% perte, RTT stable
+            make_hop_with_rtt(4, 100, 50, 14),  // perte propagée
+            make_hop_with_rtt(5, 100, 50, 15),  // perte propagée
+        ];
+        flag_icmp_ratelimiting(&mut hops);
+        let d = find_degradation(&hops).expect("doit détecter une dégradation");
+        assert_eq!(d.degradation_type, DegradationType::PacketLoss);
+    }
+
+    #[test]
+    fn test_is_bufferbloated_true() {
+        // min=20ms, max=200ms → ratio=10 > 5, jump=180ms > 80ms, min >= 10ms
+        let mut h = Hop::new(1);
+        h.sent = 10;
+        h.received = 10;
+        h.rtt_samples.push(Duration::from_millis(20));
+        h.rtt_samples.push(Duration::from_millis(200));
+        assert!(is_bufferbloated(&h));
+    }
+
+    #[test]
+    fn test_is_bufferbloated_false_rtt_too_low() {
+        // min=1ms < 10ms → false même avec grand ratio
+        let mut h = Hop::new(1);
+        h.sent = 10;
+        h.received = 10;
+        h.rtt_samples.push(Duration::from_millis(1));
+        h.rtt_samples.push(Duration::from_millis(200));
+        assert!(!is_bufferbloated(&h));
+    }
+
+    #[test]
+    fn test_is_bufferbloated_false_small_jump() {
+        // min=20ms, max=50ms → jump=30ms < 80ms → false
+        let mut h = Hop::new(1);
+        h.sent = 10;
+        h.received = 10;
+        h.rtt_samples.push(Duration::from_millis(20));
+        h.rtt_samples.push(Duration::from_millis(50));
+        assert!(!is_bufferbloated(&h));
+    }
+
+    #[test]
+    fn test_find_degradation_skips_timeout_hops() {
+        // Hop 2 est un timeout complet (aucun sample RTT) → ne doit pas bloquer la détection
+        let mut hops = vec![
+            make_hop_with_rtt(1, 100, 100, 10),
+            make_hop(2, 100, 0),               // timeout complet, 0 RTT sample
+            make_hop_with_rtt(3, 100, 100, 90), // bond depuis hop 1 (10→90ms)
+            make_hop_with_rtt(4, 100, 100, 92),
+        ];
+        flag_icmp_ratelimiting(&mut hops);
+        let d = find_degradation(&hops).expect("doit détecter un bond de latence");
+        assert_eq!(d.degradation_type, DegradationType::LatencyJump);
+        assert_eq!(d.hop_index, 2); // hop 2 est l'index du hop timeout (skippé) — c'est hop 3 (index 2) qui a le bond
+    }
 }

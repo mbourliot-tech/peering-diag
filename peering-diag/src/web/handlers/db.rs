@@ -41,6 +41,32 @@ fn human_bytes(bytes: u64) -> String {
     }
 }
 
+// ─── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_human_bytes_bytes() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(999), "999 B");
+    }
+
+    #[test]
+    fn test_human_bytes_kilobytes() {
+        assert_eq!(human_bytes(1_000), "1.0 KB");
+        assert_eq!(human_bytes(1_500), "1.5 KB");
+        assert_eq!(human_bytes(999_999), "1000.0 KB");
+    }
+
+    #[test]
+    fn test_human_bytes_megabytes() {
+        assert_eq!(human_bytes(1_000_000), "1.0 MB");
+        assert_eq!(human_bytes(2_500_000), "2.5 MB");
+    }
+}
+
 // ─── GET /api/db/stats ────────────────────────────────────────────────────────
 
 pub async fn stats(
