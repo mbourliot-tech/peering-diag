@@ -70,7 +70,7 @@ pub async fn list(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<WatchSeriesJson>>, AppError> {
     let db_path = state.db_path.clone();
-    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<WatchSeriesJson>> {
+    let mut result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<WatchSeriesJson>> {
         let conn = init_db(&db_path)?;
         let sql = "
             SELECT ws.id, ws.started_at, ws.target, ws.interval_s,
@@ -112,6 +112,22 @@ pub async fn list(
     .map_err(|e| AppError::Internal(e.to_string()))?
     .map_err(|e| AppError::Internal(e.to_string()))?;
 
+    // Corréler les sessions DB avec les jobs watch actifs (en mémoire).
+    // Un job actif a le label "watch:<target>" ; on l'associe à la série la plus
+    // récente du même target qui n'a pas encore de job_id (result est trié DESC).
+    let active = state.jobs.list().await;
+    for job in active.iter().filter(|j| {
+        j.status == crate::web::jobs::JobStatus::Running && j.command.starts_with("watch:")
+    }) {
+        let target = job.command.strip_prefix("watch:").unwrap_or("");
+        if let Some(s) = result
+            .iter_mut()
+            .find(|s| s.target == target && s.job_id.is_none())
+        {
+            s.job_id = Some(job.id);
+        }
+    }
+
     Ok(Json(result))
 }
 
@@ -122,11 +138,9 @@ pub async fn stop(
     State(state): State<Arc<AppState>>,
     Path(job_id): Path<uuid::Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // Le job watch tourne en subprocess — on marque juste le job comme terminé
-    // en attendant une implémentation SIGTERM propre.
-    // Pour l'instant on retire le job du manager (le subprocess continue brièvement
-    // puis se termine au prochain Ctrl+C interne).
     let job = state.jobs.get(job_id).await.ok_or(AppError::NotFound)?;
-    *job.status.write().await = crate::web::jobs::JobStatus::Done;
+    // Tue réellement le subprocess (abort de la task → kill_on_drop) puis retire le job.
+    job.kill().await;
+    state.jobs.remove(job_id).await;
     Ok(Json(serde_json::json!({ "stopped": job_id })))
 }

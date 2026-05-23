@@ -38,6 +38,9 @@ pub struct Job {
     // Canal broadcast pour les lignes nouvelles
     pub tx:      broadcast::Sender<String>,
     pub status:  Arc<RwLock<JobStatus>>,
+    // Handle d'annulation de la task qui supervise le subprocess.
+    // L'abandon de la task libère le `Child` (kill_on_drop) → le process est tué.
+    pub abort:   RwLock<Option<tokio::task::AbortHandle>>,
 }
 
 impl Job {
@@ -49,7 +52,17 @@ impl Job {
             lines:   Arc::new(RwLock::new(Vec::new())),
             tx,
             status:  Arc::new(RwLock::new(JobStatus::Running)),
+            abort:   RwLock::new(None),
         }
+    }
+
+    /// Tue le subprocess associé : abandonne la task de supervision, ce qui
+    /// libère le `Child` (configuré avec `kill_on_drop`) et marque le job terminé.
+    pub async fn kill(&self) {
+        if let Some(handle) = self.abort.write().await.take() {
+            handle.abort();
+        }
+        *self.status.write().await = JobStatus::Done;
     }
 
     pub async fn info(&self) -> JobInfo {
@@ -121,6 +134,7 @@ impl JobManager {
             .args(&cmd_args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
             .spawn()
             .context("spawn subprocess")?;
 
@@ -131,7 +145,7 @@ impl JobManager {
         let manager    = self.clone();
 
         // Task : lit stdout + stderr et alimente le buffer + broadcast
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut out = BufReader::new(stdout).lines();
             let mut err = BufReader::new(stderr).lines();
 
@@ -170,7 +184,15 @@ impl JobManager {
             manager.jobs.write().await.remove(&id);
         });
 
+        // Mémoriser le handle pour pouvoir tuer le subprocess via Job::kill().
+        *job.abort.write().await = Some(handle.abort_handle());
+
         Ok(id)
+    }
+
+    /// Retire un job du manager (utilisé après un arrêt explicite).
+    pub async fn remove(&self, id: Uuid) {
+        self.jobs.write().await.remove(&id);
     }
 }
 
