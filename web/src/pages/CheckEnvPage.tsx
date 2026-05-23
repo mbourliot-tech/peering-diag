@@ -3,10 +3,10 @@ import { startJob } from '../api'
 import { TerminalOutput } from '../components/TerminalOutput'
 
 const CHECKS = [
-  { icon: '⚡', label: 'mtr',    desc: 'Traceroute avec statistiques par hop' },
-  { icon: '🌐', label: 'curl',   desc: 'Requêtes HTTP / accès internet' },
-  { icon: '📡', label: 'iperf3', desc: 'Test de débit réseau' },
-  { icon: '🔍', label: 'dig',    desc: 'Résolution DNS' },
+  { icon: '🔒', label: 'RAW ICMP',  desc: 'Sockets RAW ICMP (admin/root requis)' },
+  { icon: '⚡', label: 'mtr',       desc: 'Traceroute avec statistiques par hop' },
+  { icon: '🌐', label: 'curl',      desc: 'Requêtes HTTP / accès internet' },
+  { icon: '📡', label: 'iperf3',    desc: 'Test de débit réseau' },
 ]
 
 export function CheckEnvPage() {

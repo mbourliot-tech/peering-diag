@@ -17,6 +17,7 @@ use peering_diag::{
     },
     types::{AsInfo, DiagnosticReport, Hop, Severity, SpeedtestResult, VerdictStatus},
 };
+use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -472,10 +473,25 @@ async fn run_ecmp(target: &str, port: u16, flows: u16, probes: u32, ttl: u8) -> 
     Ok(())
 }
 
-// ─── Commande check-env (inchangée) ──────────────────────────────────────────
+// ─── Commande check-env ───────────────────────────────────────────────────────
+
+fn check_raw_icmp_privilege() -> bool {
+    Socket::new(Domain::IPV4, Type::RAW, Some(Protocol::ICMPV4)).is_ok()
+}
 
 async fn check_env() -> Result<()> {
     println!("{}", "Vérification de l'environnement...".bold());
+
+    // Sockets RAW ICMP — requis pour toutes les commandes de diagnostic
+    if check_raw_icmp_privilege() {
+        println!("  {} sockets RAW ICMP : OK", "✔".green());
+    } else {
+        println!("  {} sockets RAW ICMP : accès refusé", "✖".red());
+        #[cfg(target_os = "windows")]
+        println!("    Windows : relancer en tant qu'Administrateur");
+        #[cfg(not(target_os = "windows"))]
+        println!("    Linux   : sudo peering-diag …  ou  setcap cap_net_raw+ep <binaire>");
+    }
 
     match check_speedtest_cli().await {
         Ok(version) => println!("  {} speedtest CLI : {}", "✔".green(), version.lines().next().unwrap_or("")),
