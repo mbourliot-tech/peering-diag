@@ -10,11 +10,17 @@ Outil de diagnostic de peering réseau écrit en Rust. Détecte et localise les 
 - [Installation Windows](#installation-windows)
 - [Installation Linux](#installation-linux)
 - [Utilisation](#utilisation)
+- [Historisation & analyse temporelle](#historisation--analyse-temporelle)
+  - [Options de `history`](#options-de-history)
+  - [Mode `watch`](#mode-watch)
+  - [Maintenance de la base (`db`)](#maintenance-de-la-base-db)
+- [Interface web (`serve`)](#interface-web-serve)
 - [Lire les résultats](#lire-les-résultats)
   - [Le tableau MTR (chemin aller)](#le-tableau-mtr-chemin-aller)
   - [Le tableau des speedtests](#le-tableau-des-speedtests)
   - [Le tableau MTR retour](#le-tableau-mtr-retour)
   - [La section Analyse](#la-section-analyse)
+  - [L'analyse temporelle](#lanalyse-temporelle)
   - [Le verdict](#le-verdict)
   - [La sortie ecmp](#la-sortie-ecmp)
 - [Privilèges réseau](#privilèges-réseau)
@@ -125,6 +131,21 @@ iperf3 --version
 ```
 
 Si ni `speedtest` ni `iperf3` ne sont installés, la phase 2 est ignorée et seul le MTR s'exécute.
+
+### 3 ter. Installer Node.js / npm (uniquement pour l'interface web)
+
+> **Facultatif** — requis **seulement si vous voulez compiler l'interface web** (commande `serve`). Le CLI seul n'en a pas besoin.
+
+```powershell
+winget install OpenJS.NodeJS.LTS
+```
+
+Vérifier :
+
+```powershell
+node --version
+npm --version
+```
 
 ### 4. Compiler peering-diag
 
@@ -259,6 +280,21 @@ sudo pacman -S iperf3
 
 Si ni `speedtest` ni `iperf3` ne sont installés, la phase 2 est ignorée et seul le MTR s'exécute.
 
+### 3 ter. Installer Node.js / npm (uniquement pour l'interface web)
+
+> **Facultatif** — requis **seulement si vous voulez compiler l'interface web** (commande `serve`). Le CLI seul n'en a pas besoin.
+
+```bash
+# Debian / Ubuntu
+sudo apt install -y nodejs npm
+
+# Fedora / RHEL
+sudo dnf install -y nodejs npm
+
+# Arch Linux
+sudo pacman -S nodejs npm
+```
+
 ### 4. Compiler peering-diag
 
 ```bash
@@ -321,6 +357,10 @@ peering-diag diag ftp.exemple.com
 | `peering-diag lg <cible>` | Chemin retour + URLs Looking Glass pour investigation manuelle | 2 à 3 min |
 | `peering-diag mtr <cible>` | MTR brut : chemin réseau + analyse (sans speedtests) | 2 à 3 min |
 | `peering-diag ecmp <cible>` | Sonde ECMP TCP : détecte un déséquilibre de charge sur N chemins parallèles | 30 s à 2 min |
+| `peering-diag history <db>` | Affiche l'historique des runs stockés en base SQLite + analyse temporelle | Immédiat |
+| `peering-diag watch <cible> --db <db>` | Surveillance périodique : runs automatiques à intervalles réguliers, stockés en DB | Continu |
+| `peering-diag db --db <db>` | Maintenance de la base SQLite : statistiques, purge, compactage | Immédiat |
+| `peering-diag serve` | Lance l'interface web (dashboard navigateur) pour piloter et visualiser tout l'outil | Continu |
 | `peering-diag check-env` | Vérifie que speedtest CLI et iperf3 sont installés | Immédiat |
 
 ### Options de `aller`
@@ -408,6 +448,162 @@ peering-diag ecmp ftp.example.com --port 21
 # Sonde ECMP approfondie : 12 flows, 10 probes par flow
 peering-diag ecmp monserveur.example.com --flows 12 --probes 10
 ```
+
+---
+
+## Historisation & analyse temporelle
+
+Un seul run ne capture qu'un instantané — or les problèmes de peering sont souvent **intermittents** (congestion uniquement aux heures de pointe). En stockant les diagnostics dans une base SQLite (`--db`), on peut comparer les runs dans le temps, repérer les heures de pointe récurrentes et détecter une tendance lente à la dégradation.
+
+Les commandes `diag`, `aller` et `watch` acceptent toutes `--db <fichier>` : chaque run y est archivé (chemin aller, chemin retour, speedtests). La commande `history` relit ensuite cette base.
+
+### Options de `history`
+
+```
+peering-diag history <db> [options]
+```
+
+Le chemin de la base est un **argument positionnel** (pas un flag).
+
+| Option | Défaut | Description |
+|---|---|---|
+| `<db>` | — (requis) | Chemin vers la base SQLite à lire (argument positionnel). |
+| `--target <cible>` | toutes | Filtre sur une cible spécifique (ex : `ftp.exemple.com`). |
+| `--last <N>` | `20` | Affiche les N derniers runs. Détermine aussi la fenêtre de la détection de tendance. |
+| `--since <date>` | — | Ne montre que les runs depuis cette date (format RFC3339, ex : `2026-05-21T18:00`). |
+| `--by-hour` | désactivé | Agrège les runs par heure de la journée (UTC) pour révéler les pics de congestion. |
+| `--hop <filtre>` | — | Zoom sur l'évolution d'un hop précis dans le temps. Accepte une IP (`1.2.3.4`) ou un ASN (`AS1299` ou `1299`). Affiche les chemins aller et retour. |
+| `--run <id>` | — | Affiche le détail hop par hop d'un run précis (l'ID figure dans la colonne `#ID` du tableau chronologique). |
+
+La vue chronologique (par défaut) et la vue `--by-hour` ajoutent automatiquement un bloc [Analyse temporelle](#lanalyse-temporelle) en fin de sortie.
+
+```bash
+# Les 20 derniers runs de toutes les cibles + analyse temporelle
+peering-diag history historique.sqlite
+
+# Les 50 derniers runs d'une cible précise
+peering-diag history historique.sqlite --target ftp.exemple.com --last 50
+
+# Pattern heures de pointe (agrégation par heure UTC)
+peering-diag history historique.sqlite --by-hour
+
+# Évolution d'un opérateur de transit précis dans le temps
+peering-diag history historique.sqlite --hop AS1299
+
+# Détail hop par hop d'un run identifié (ID visible dans le tableau)
+peering-diag history historique.sqlite --run 42
+
+# Runs depuis une date donnée
+peering-diag history historique.sqlite --since 2026-05-21T18:00
+```
+
+### Mode `watch`
+
+`watch` exécute des diagnostics **automatiquement à intervalles réguliers** et les archive en base. C'est le moyen le plus simple de capturer une congestion intermittente : on laisse tourner plusieurs heures (ou jours), puis on analyse avec `history`.
+
+Chaque run du mode `watch` exécute un chemin aller (MTR 5 rounds + speedtests sauf `--no-speedtest`) suivi d'un chemin retour Globalping. Tous les runs d'une session sont reliés à une **série watch** identifiée en base, ce qui permet de les retrouver et de tracer les tendances horaires.
+
+```
+peering-diag watch <cible> --db <db> [options]
+```
+
+| Option | Défaut | Description |
+|---|---|---|
+| `<cible>` | — (requis) | Cible à surveiller (hostname ou IP). |
+| `--db <fichier>` | — (requis) | Base SQLite où stocker chaque run. Créée si absente. |
+| `--interval <minutes>` | `15` | Intervalle entre deux runs. |
+| `--count <N>` | `0` | Nombre de runs à effectuer (`0` = boucle infinie jusqu'à Ctrl+C). |
+| `--no-speedtest` | désactivé | Passe la phase speedtest — runs nettement plus rapides. |
+| `--quiet` | désactivé | N'affiche qu'une ligne de résumé par run (verdict + métriques clés), sans le tableau MTR complet. |
+| `--my-ip <IP>` | auto-détecté | IP publique cible du traceroute retour. Détectée automatiquement si absente. |
+
+Le mode `watch` requiert les droits administrateur (raw sockets ICMP pour le MTR aller), comme `diag` et `aller`. L'arrêt par Ctrl+C est propre : le run en cours se termine avant l'arrêt. Un résumé final indique le nombre de runs et la répartition sain / dégradé / faulty.
+
+```bash
+# Surveiller toutes les 15 min, en continu, jusqu'à Ctrl+C
+peering-diag watch ftp.exemple.com --db historique.sqlite
+
+# 24 runs espacés de 30 min (12 h de surveillance), mode compact
+peering-diag watch ftp.exemple.com --db historique.sqlite --interval 30 --count 24 --quiet
+
+# Surveillance rapide sans speedtest, toutes les 5 min
+peering-diag watch ftp.exemple.com --db historique.sqlite --interval 5 --no-speedtest
+
+# Analyser ensuite les données collectées
+peering-diag history historique.sqlite --target ftp.exemple.com --by-hour
+```
+
+### Maintenance de la base (`db`)
+
+À mesure que `watch` accumule des runs, la base grossit. La commande `db` permet d'inspecter, de purger et de compacter la base. **Au moins une option doit être fournie** (sinon l'aide est affichée).
+
+```
+peering-diag db --db <db> [options]
+```
+
+| Option | Défaut | Description |
+|---|---|---|
+| `--db <fichier>` | — (requis) | Chemin vers la base SQLite. |
+| `--stats` | — | Affiche les statistiques : nombre de runs, hops, speedtests, séries watch, plus ancien / plus récent run, taille du fichier. |
+| `--purge-older-than <jours>` | — | Supprime tous les runs plus anciens que N jours. |
+| `--keep-last <N>` | — | Ne garde que les N runs les plus récents (supprime le reste). |
+| `--vacuum` | — | Compacte la base (SQLite `VACUUM`) pour récupérer l'espace après une purge. |
+
+```bash
+# Voir les statistiques de la base
+peering-diag db --db historique.sqlite --stats
+
+# Supprimer les runs de plus de 30 jours, puis compacter
+peering-diag db --db historique.sqlite --purge-older-than 30 --vacuum
+
+# Ne garder que les 500 runs les plus récents
+peering-diag db --db historique.sqlite --keep-last 500
+```
+
+---
+
+## Interface web (`serve`)
+
+L'interface web est un **dashboard navigateur** qui pilote l'ensemble de l'outil sans ligne de commande : lancer un diagnostic, consulter l'historique avec des graphiques, gérer les sessions `watch` et faire la maintenance de la base.
+
+```
+peering-diag serve [--port 7373] [--db <chemin>]
+```
+
+| Option | Défaut | Description |
+|---|---|---|
+| `--port <n>` | `7373` | Port d'écoute. Le serveur n'écoute que sur `localhost` (127.0.0.1). |
+| `--db <fichier>` | `peering-diag.db` à côté de l'exécutable | Base SQLite utilisée (lecture historique + écriture des nouveaux runs). Créée si absente. |
+
+Une fois lancé, ouvrir [http://localhost:7373/](http://localhost:7373/) dans le navigateur. Le dashboard permet de :
+
+- **Lancer toutes les commandes** (`diag`, `aller`, `retour`, `mtr`, `ecmp`…) depuis des formulaires, avec sortie en temps réel.
+- **Explorer l'historique** sous forme de graphiques (évolution RTT / perte / débit, pattern heures de pointe, détail d'un run).
+- **Gérer les sessions `watch`** : démarrer, lister et arrêter des surveillances périodiques.
+- **Maintenir la base** : statistiques, purge, compactage (équivalent web de la commande `db`).
+
+![Capture interface web](docs/screenshot-web.png)
+
+### Compiler le frontend
+
+Le frontend (dossier `web/`) doit être compilé une fois avant de servir l'interface. Cela requiert **Node.js / npm** (voir Prérequis) :
+
+```bash
+cd web
+npm install
+npm run build
+```
+
+Cela produit le dossier `web/dist/`. En développement, `serve` sert automatiquement `web/dist/` depuis la racine du projet. Si ce dossier est introuvable, le serveur l'indique et invite à lancer `cd web && npm run build`.
+
+### Distribution
+
+Pour distribuer l'interface web, copier **deux éléments côte à côte** :
+
+- le binaire `peering-diag` (ou `peering-diag.exe`) ;
+- le dossier `dist/` (le contenu de `web/dist/`) placé **à côté du binaire**.
+
+Au démarrage, `serve` cherche le frontend dans `web/dist/` (mode dev) puis dans `dist/` à côté de l'exécutable (mode distribué). De même, la base par défaut (`peering-diag.db`) est créée à côté du binaire si `--db` n'est pas précisé.
 
 ---
 
@@ -527,6 +723,34 @@ Catégories de findings :
 - **[PEERING]** — problème d'interconnexion entre AS
 - **[ROUTAGE]** — chemin sous-optimal ou détour géographique
 - **[INFO]** — observation neutre (rate-limit, latence physique normale)
+
+### L'analyse temporelle
+
+Quand on consulte l'historique (`peering-diag history …`), un bloc **Analyse temporelle** s'ajoute en fin de sortie dès qu'il y a quelque chose à signaler. Il croise tous les runs stockés pour révéler deux choses qu'un run isolé ne peut pas montrer.
+
+**Heures de pointe récurrentes** — l'outil agrège les runs par heure de la journée (UTC) et marque comme « congestion récurrente » toute plage horaire où **plus de 50 % des runs sont dégradés ou faulty** (avec au moins 2 échantillons dans la plage). Les heures consécutives sont regroupées en une seule plage. C'est la signature typique d'un peering saturé aux heures de pointe :
+
+```
+═══════════════════════════════════════════════════
+  Analyse temporelle
+
+  ⚠ Congestion récurrente 19h–23h UTC (14/18 runs dégradés ou faulty)
+    → 78% des runs sur ce créneau sont dégradés — perte moy 3.2%, RTT moy 142 ms
+```
+
+L'icône passe de `⚠` à `✖` quand 80 % ou plus des runs du créneau sont dégradés.
+
+**Tendance à la dégradation** — sur les N derniers runs (fenêtre fixée par `--last`), une **régression linéaire** est calculée sur le RTT moyen, la perte maximale et le débit. La tendance n'est rapportée que si elle est significative (delta RTT > 10 ms, delta perte > 0,5 %, ou variation de débit > 10 % sur la période, à partir d'au moins 5 runs). Le bloc indique le sens de l'évolution (dégradation ou amélioration), la durée couverte et les deltas estimés :
+
+```
+  ⚠ Tendance à la dégradation (32 runs sur 4.1 jours)
+    → RTT moyen +18 ms total
+    → Perte +1.2% total
+    → Débit -23% relatif
+═══════════════════════════════════════════════════
+```
+
+Une tendance à la hausse du RTT ou de la perte (ou à la baisse du débit) signale un lien qui se sature progressivement — utile pour anticiper avant que le problème ne devienne bloquant.
 
 ### Le verdict
 
@@ -772,11 +996,19 @@ src/
 
 ## Évolutions prévues
 
-- [ ] **Mode `watch`** — surveillance périodique (toutes les N minutes), stockage SQLite, détection automatique des patterns horaires
-- [ ] **Dashboard web** — visualisation de l'historique via Axum + Chart.js (corrélation heure du jour ↔ débit, heatmap)
-- [x] **Sonde ECMP TCP (Phase A)** — exploration multi-flow via connect() avec port source variable, détection de déséquilibre à la cible finale (sans droits admin)
+### ✅ Réalisé
+
+- [x] **Historisation SQLite** — chaque run (`diag`, `aller`, `watch`) archivé en base : chemin aller, chemin retour, speedtests, hops détaillés. Consultation via `history`.
+- [x] **Analyse temporelle** — détection des heures de pointe récurrentes (créneaux où >50 % des runs sont dégradés) et de la tendance à la dégradation (régression linéaire RTT / perte / débit sur les N derniers runs).
+- [x] **Mode `watch`** — surveillance périodique (toutes les N minutes), stockage SQLite par série, runs reliés pour l'analyse des patterns horaires.
+- [x] **Interface web** — dashboard navigateur (Axum + frontend compilé) pour piloter toutes les commandes, visualiser l'historique en graphiques, gérer les sessions watch et la base. Commande `serve`.
+- [x] **Maintenance de la base** — statistiques, purge par âge ou par nombre, compactage (`VACUUM`). Commande `db`.
+- [x] **Sonde ECMP TCP (Phase A)** — exploration multi-flow via connect() avec port source variable, détection de déséquilibre à la cible finale (sans droits admin).
+- [x] **Chemin retour automatique** — traceroute retour via sondes Globalping distribuées dans les AS du chemin aller, agrégation MTR-style (Loss%, Avg, Min, Max, StDev), analyse symétrique en 7 points, verdict indépendant.
+
+### À venir
+
 - [ ] **Paris-traceroute TCP (Phase B)** — raw SYN + pcap pour mesurer les hops intermédiaires sur chaque chemin ECMP, pas seulement la cible finale
-- [x] **Chemin retour automatique** — traceroute retour via sondes Globalping distribuées dans les AS du chemin aller, agrégation MTR-style (Loss%, Avg, Min, Max, StDev), analyse symétrique en 7 points, verdict indépendant
 - [ ] **Intégration RIPE Atlas** — complément à Globalping pour les AS sans sonde disponible ; permet aussi de mesurer depuis des sondes résidentielles (pas seulement datacenter)
 - [ ] **Mode `vpn-pivot`** — relancer automatiquement les mesures via plusieurs configs WireGuard pour confirmer un problème de peering par contournement
 - [ ] **Support IPv6** — les probes ICMP actuels sont IPv4 uniquement
