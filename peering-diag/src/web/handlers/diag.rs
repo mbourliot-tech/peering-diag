@@ -58,10 +58,28 @@ fn build_args(
     command: &str,
     args: &HashMap<String, serde_json::Value>,
 ) -> Result<Vec<String>, AppError> {
+    // Whitelist des commandes autorisées
+    const VALID_COMMANDS: &[&str] = &[
+        "diag", "aller", "mtr", "ecmp", "retour", "lg", "check-env", "watch",
+    ];
+    if !VALID_COMMANDS.contains(&command) {
+        return Err(AppError::BadRequest(format!("Commande inconnue : {command}")));
+    }
+
     let mut cli = vec![command.to_string()];
 
     // target (positionnel — toujours en premier si présent)
     if let Some(t) = args.get("target").and_then(|v| v.as_str()) {
+        if t.starts_with('-') {
+            return Err(AppError::BadRequest(
+                "Cible invalide : ne peut pas commencer par '-'".into(),
+            ));
+        }
+        if t.len() > 253 {
+            return Err(AppError::BadRequest(
+                "Cible trop longue (max 253 caractères)".into(),
+            ));
+        }
         cli.push(t.to_string());
     }
 

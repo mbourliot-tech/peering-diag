@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use axum::http::{header, HeaderValue, Method};
 use tower_http::{cors::CorsLayer, services::ServeDir};
 
 use crate::web::{
@@ -64,7 +65,15 @@ pub async fn run_serve(port: u16, db_path: PathBuf) -> Result<()> {
         // ── Frontend statique ─────────────────────────────────────────────────
         .fallback_service(ServeDir::new(&frontend_dir))
         .with_state(state.clone())
-        .layer(CorsLayer::permissive());
+        .layer(
+            CorsLayer::new()
+                .allow_origin([
+                    format!("http://localhost:{port}").parse::<HeaderValue>().expect("valid origin"),
+                    format!("http://127.0.0.1:{port}").parse::<HeaderValue>().expect("valid origin"),
+                ])
+                .allow_methods([Method::GET, Method::POST, Method::DELETE])
+                .allow_headers([header::CONTENT_TYPE]),
+        );
 
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
 

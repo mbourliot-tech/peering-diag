@@ -96,7 +96,7 @@ pub async fn list(
     let db_path = state.db_path.clone();
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<RunJson>> {
         let conn  = init_db(&db_path)?;
-        let limit = q.last.unwrap_or(50);
+        let limit = q.last.unwrap_or(50).clamp(1, 10_000);
         let sql = "
             SELECT
                 r.id, r.timestamp, r.target, r.payload_json,
@@ -307,7 +307,7 @@ pub async fn hop(
     let db_path = state.db_path.clone();
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
         let conn  = init_db(&db_path)?;
-        let limit = q.last.unwrap_or(50);
+        let limit = q.last.unwrap_or(50).clamp(1, 10_000);
 
         let upper = filter.to_uppercase();
         let filter_asn: Option<i64> = if let Some(s) = upper.strip_prefix("AS") {

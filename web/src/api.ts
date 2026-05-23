@@ -92,22 +92,26 @@ export async function fetchHistory(params: { target?: string; last?: number; sin
   if (params.last)   qs.set('last', String(params.last))
   if (params.since)  qs.set('since', params.since)
   const res = await fetch(`${BASE}/history?${qs}`)
+  if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
 export async function fetchByHour(target?: string): Promise<HourStatJson[]> {
   const qs = target ? `?target=${encodeURIComponent(target)}` : ''
   const res = await fetch(`${BASE}/history/by-hour${qs}`)
+  if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
 export async function fetchRunDetail(id: number): Promise<RunDetailJson> {
   const res = await fetch(`${BASE}/history/run/${id}`)
+  if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
 export async function fetchWatchList(): Promise<WatchSeriesJson[]> {
   const res = await fetch(`${BASE}/watch`)
+  if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
 
@@ -117,12 +121,14 @@ export async function startWatch(target: string, interval: number, noSpeedtest: 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ target, interval, no_speedtest: noSpeedtest }),
   })
+  if (!res.ok) throw new Error(await res.text())
   const data = await res.json()
   return data.job_id
 }
 
 export async function stopWatch(jobId: string): Promise<void> {
-  await fetch(`${BASE}/watch/${jobId}`, { method: 'DELETE' })
+  const res = await fetch(`${BASE}/watch/${jobId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(await res.text())
 }
 
 export function fmtTs(ts: string): string {

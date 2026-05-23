@@ -96,9 +96,11 @@ pub async fn purge(
     let deleted = tokio::task::spawn_blocking(move || -> anyhow::Result<i64> {
         let conn = init_db(&db_path)?;
         if let Some(days) = body.older_than_days {
+            let days = days.clamp(1, 3_650);
             return maintenance::purge_older_than(&conn, days);
         }
         if let Some(keep) = body.keep_last {
+            let keep = keep.clamp(1, 10_000);
             return maintenance::purge_keep_last(&conn, keep);
         }
         Ok(0)
