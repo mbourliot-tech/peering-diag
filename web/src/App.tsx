@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
+import { ErrorBoundary } from './components/ErrorBoundary'
 
 // Chargement paresseux — chaque page devient un chunk séparé
 const DiagPage     = lazy(() => import('./pages/DiagPage').then(m => ({ default: m.DiagPage })))
@@ -62,21 +63,23 @@ export default function App() {
 
         {/* ── Contenu ─────────────────────────────────────────────────────── */}
         <main className="flex-1 max-w-7xl mx-auto w-full px-6 py-8">
-          <Suspense fallback={
-            <div className="flex items-center justify-center py-20 text-slate-500 gap-3">
-              <span className="inline-block w-5 h-5 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
-              Chargement…
-            </div>
-          }>
-            <Routes>
-              <Route path="/"          element={<Navigate to="/diag" replace />} />
-              <Route path="/diag"      element={<DiagPage />} />
-              <Route path="/history"   element={<HistoryPage />} />
-              <Route path="/watch"     element={<WatchPage />} />
-              <Route path="/check-env" element={<CheckEnvPage />} />
-              <Route path="/db"        element={<DbPage />} />
-            </Routes>
-          </Suspense>
+          <ErrorBoundary>
+            <Suspense fallback={
+              <div className="flex items-center justify-center py-20 text-slate-500 gap-3">
+                <span className="inline-block w-5 h-5 border-2 border-slate-700 border-t-blue-500 rounded-full animate-spin" />
+                Chargement…
+              </div>
+            }>
+              <Routes>
+                <Route path="/"          element={<Navigate to="/diag" replace />} />
+                <Route path="/diag"      element={<DiagPage />} />
+                <Route path="/history"   element={<HistoryPage />} />
+                <Route path="/watch"     element={<WatchPage />} />
+                <Route path="/check-env" element={<CheckEnvPage />} />
+                <Route path="/db"        element={<DbPage />} />
+              </Routes>
+            </Suspense>
+          </ErrorBoundary>
         </main>
 
         {/* ── Footer ──────────────────────────────────────────────────────── */}
