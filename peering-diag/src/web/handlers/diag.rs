@@ -46,7 +46,7 @@ pub async fn start_job(
 
     let job_id = state
         .jobs
-        .spawn(req.command.clone(), args, db_path)
+        .spawn(req.command.clone(), args, db_path, Some(crate::web::jobs::JOB_TIMEOUT_SECS))
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
 

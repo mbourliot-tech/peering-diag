@@ -15,7 +15,7 @@ use tokio::sync::{broadcast, watch, RwLock, Semaphore};
 use uuid::Uuid;
 
 const MAX_CONCURRENT_JOBS: usize = 8;
-const JOB_TIMEOUT_SECS:    u64   = 600; // 10 min
+pub const JOB_TIMEOUT_SECS: u64  = 600; // 10 min — pour les jobs standards (non-watch)
 const LINE_BUFFER_CAP:     usize = 5_000;
 
 // ─── État d'un job ────────────────────────────────────────────────────────────
@@ -118,12 +118,14 @@ impl JobManager {
     }
 
     /// Spawne un sous-processus avec les args donnés.
+    /// `timeout_secs` : Some(n) pour tuer après n secondes, None = pas de timeout (ex: watch).
     /// Retourne l'UUID du job créé, ou une erreur si le plafond de concurrence est atteint.
     pub async fn spawn(
         self: &Arc<Self>,
         command_label: String,
         args: Vec<String>,
         db_path: Option<PathBuf>,
+        timeout_secs: Option<u64>,
     ) -> Result<Uuid> {
         // Limiter la concurrence : erreur immédiate si le plafond est atteint.
         let permit = Arc::clone(&self.semaphore)
@@ -175,51 +177,56 @@ impl JobManager {
             // Cloner job_clone pour le passer dans la future interne (move)
             let job_inner = job_clone.clone();
 
-            let timed_out = tokio::time::timeout(
-                Duration::from_secs(JOB_TIMEOUT_SECS),
-                async move {
-                    let mut out = BufReader::new(stdout).lines();
-                    let mut err = BufReader::new(stderr).lines();
+            let inner_fut = async move {
+                let mut out = BufReader::new(stdout).lines();
+                let mut err = BufReader::new(stderr).lines();
 
-                    loop {
-                        tokio::select! {
-                            line = out.next_line() => {
-                                match line {
-                                    Ok(Some(l)) => job_inner.push_line(&l).await,
-                                    _ => break,
-                                }
+                loop {
+                    tokio::select! {
+                        line = out.next_line() => {
+                            match line {
+                                Ok(Some(l)) => job_inner.push_line(&l).await,
+                                _ => break,
                             }
-                            line = err.next_line() => {
-                                match line {
-                                    Ok(Some(l)) => job_inner.push_line(&l).await,
-                                    _ => {}
-                                }
+                        }
+                        line = err.next_line() => {
+                            match line {
+                                Ok(Some(l)) => job_inner.push_line(&l).await,
+                                _ => {}
                             }
                         }
                     }
-                    // Vider stderr restant
-                    while let Ok(Some(l)) = err.next_line().await {
-                        job_inner.push_line(&l).await;
-                    }
+                }
+                // Vider stderr restant
+                while let Ok(Some(l)) = err.next_line().await {
+                    job_inner.push_line(&l).await;
+                }
 
-                    // Attendre la fin du processus
-                    let status = child.wait().await;
-                    let final_status = match status {
-                        Ok(s) if s.success() => JobStatus::Done,
-                        _ => JobStatus::Failed,
-                    };
-                    *job_inner.status.write().await = final_status;
-                    let _ = job_inner.done.send(true);
-                },
-            )
-            .await;
+                // Attendre la fin du processus
+                let status = child.wait().await;
+                let final_status = match status {
+                    Ok(s) if s.success() => JobStatus::Done,
+                    _ => JobStatus::Failed,
+                };
+                *job_inner.status.write().await = final_status;
+                let _ = job_inner.done.send(true);
+            };
 
-            if timed_out.is_err() {
-                // Le sous-processus est tué via kill_on_drop en droppant la future ci-dessus.
+            let did_timeout = if let Some(secs) = timeout_secs {
+                // Le sous-processus est tué via kill_on_drop quand la future est droppée.
+                tokio::time::timeout(Duration::from_secs(secs), inner_fut)
+                    .await
+                    .is_err()
+            } else {
+                inner_fut.await;
+                false
+            };
+
+            if did_timeout {
                 job_clone
                     .push_line(&format!(
                         "[peering-diag] Job interrompu : timeout de {} min dépassé.",
-                        JOB_TIMEOUT_SECS / 60
+                        timeout_secs.unwrap_or(0) / 60
                     ))
                     .await;
                 *job_clone.status.write().await = JobStatus::Failed;

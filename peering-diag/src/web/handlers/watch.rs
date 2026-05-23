@@ -57,7 +57,7 @@ pub async fn start(
 
     let job_id = state
         .jobs
-        .spawn(format!("watch:{}", req.target), args, Some(state.db_path.clone()))
+        .spawn(format!("watch:{}", req.target), args, Some(state.db_path.clone()), None)
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
