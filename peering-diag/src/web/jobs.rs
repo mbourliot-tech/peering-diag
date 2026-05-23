@@ -4,14 +4,18 @@
 //! ligne par ligne, et bufferise les lignes pour les rejouer aux clients SSE
 //! qui se connectent après le démarrage.
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{broadcast, RwLock, Semaphore};
 use uuid::Uuid;
+
+const MAX_CONCURRENT_JOBS: usize = 8;
+const JOB_TIMEOUT_SECS:    u64   = 600; // 10 min
 
 // ─── État d'un job ────────────────────────────────────────────────────────────
 
@@ -81,12 +85,16 @@ impl Job {
 // ─── Manager ─────────────────────────────────────────────────────────────────
 
 pub struct JobManager {
-    jobs: RwLock<HashMap<Uuid, Arc<Job>>>,
+    jobs:      RwLock<HashMap<Uuid, Arc<Job>>>,
+    semaphore: Arc<Semaphore>,
 }
 
 impl JobManager {
     pub fn new() -> Self {
-        Self { jobs: RwLock::new(HashMap::new()) }
+        Self {
+            jobs:      RwLock::new(HashMap::new()),
+            semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_JOBS)),
+        }
     }
 
     pub async fn get(&self, id: Uuid) -> Option<Arc<Job>> {
@@ -103,13 +111,21 @@ impl JobManager {
     }
 
     /// Spawne un sous-processus avec les args donnés.
-    /// Retourne l'UUID du job créé.
+    /// Retourne l'UUID du job créé, ou une erreur si le plafond de concurrence est atteint.
     pub async fn spawn(
         self: &Arc<Self>,
         command_label: String,
         args: Vec<String>,
         db_path: Option<PathBuf>,
     ) -> Result<Uuid> {
+        // Limiter la concurrence : erreur immédiate si le plafond est atteint.
+        let permit = Arc::clone(&self.semaphore)
+            .try_acquire_owned()
+            .map_err(|_| anyhow!(
+                "Trop de jobs simultanés (max {}). Réessayez dans un instant.",
+                MAX_CONCURRENT_JOBS
+            ))?;
+
         let id  = Uuid::new_v4();
         let job = Arc::new(Job::new(id, command_label));
 
@@ -141,46 +157,69 @@ impl JobManager {
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
 
-        let job_clone  = job.clone();
-        let manager    = self.clone();
+        let job_clone = job.clone();
+        let manager   = self.clone();
 
-        // Task : lit stdout + stderr et alimente le buffer + broadcast
+        // Task : lit stdout + stderr et alimente le buffer + broadcast.
+        // Le permit est tenu jusqu'à la fin de la task → slot libéré automatiquement.
         let handle = tokio::spawn(async move {
-            let mut out = BufReader::new(stdout).lines();
-            let mut err = BufReader::new(stderr).lines();
+            let _permit = permit;
 
-            loop {
-                tokio::select! {
-                    line = out.next_line() => {
-                        match line {
-                            Ok(Some(l)) => job_clone.push_line(&l).await,
-                            _ => break,
+            // Cloner job_clone pour le passer dans la future interne (move)
+            let job_inner = job_clone.clone();
+
+            let timed_out = tokio::time::timeout(
+                Duration::from_secs(JOB_TIMEOUT_SECS),
+                async move {
+                    let mut out = BufReader::new(stdout).lines();
+                    let mut err = BufReader::new(stderr).lines();
+
+                    loop {
+                        tokio::select! {
+                            line = out.next_line() => {
+                                match line {
+                                    Ok(Some(l)) => job_inner.push_line(&l).await,
+                                    _ => break,
+                                }
+                            }
+                            line = err.next_line() => {
+                                match line {
+                                    Ok(Some(l)) => job_inner.push_line(&l).await,
+                                    _ => {}
+                                }
+                            }
                         }
                     }
-                    line = err.next_line() => {
-                        match line {
-                            Ok(Some(l)) => job_clone.push_line(&l).await,
-                            _ => {}
-                        }
+                    // Vider stderr restant
+                    while let Ok(Some(l)) = err.next_line().await {
+                        job_inner.push_line(&l).await;
                     }
-                }
-            }
-            // Vider stderr restant
-            while let Ok(Some(l)) = err.next_line().await {
-                job_clone.push_line(&l).await;
-            }
 
-            // Attendre la fin du processus
-            let status = child.wait().await;
-            let final_status = match status {
-                Ok(s) if s.success() => JobStatus::Done,
-                _ => JobStatus::Failed,
-            };
-            *job_clone.status.write().await = final_status;
+                    // Attendre la fin du processus
+                    let status = child.wait().await;
+                    let final_status = match status {
+                        Ok(s) if s.success() => JobStatus::Done,
+                        _ => JobStatus::Failed,
+                    };
+                    *job_inner.status.write().await = final_status;
+                },
+            )
+            .await;
+
+            if timed_out.is_err() {
+                // Le sous-processus est tué via kill_on_drop en droppant la future ci-dessus.
+                job_clone
+                    .push_line(&format!(
+                        "[peering-diag] Job interrompu : timeout de {} min dépassé.",
+                        JOB_TIMEOUT_SECS / 60
+                    ))
+                    .await;
+                *job_clone.status.write().await = JobStatus::Failed;
+            }
 
             // Nettoyer les vieux jobs terminés après 10 min
             let id = job_clone.id;
-            tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+            tokio::time::sleep(Duration::from_secs(600)).await;
             manager.jobs.write().await.remove(&id);
         });
 
