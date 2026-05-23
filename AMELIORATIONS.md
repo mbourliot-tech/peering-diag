@@ -85,6 +85,14 @@ Si une page lève une exception → écran blanc. Un `<ErrorBoundary>` autour du
 `api.ts::streamJob` — `onerror` ferme direct. Une stratégie de backoff éviterait de perdre
 le flux sur micro-coupure.
 
+### 11. Pas de bouton Stop pour les jobs (diag, mtr, aller…)
+L'UI web n'a pas de moyen d'interrompre un run en cours (contrairement au CLI où Ctrl+C suffit).
+L'infrastructure est quasi prête :
+- `Job::kill()` existe dans `jobs.rs` — il manque juste `let _ = self.done.send(true)` pour signaler la fin au stream SSE.
+- Ajouter `DELETE /api/jobs/:id` (handler `stop_job` dans `diag.rs` + route dans `server.rs`).
+- `stopJob(id)` dans `api.ts` + bouton Stop dans `DiagPage.tsx` visible pendant `running === true`.
+Estimation : ~1h.
+
 ---
 
 ## Ordre d'attaque suggéré
