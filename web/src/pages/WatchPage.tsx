@@ -35,7 +35,7 @@ export function WatchPage() {
     setError('')
     setStarting(true)
     try {
-      const jobId = await startWatch(target.trim(), intervalMin * 60, noSpeedtest)
+      const jobId = await startWatch(target.trim(), intervalMin, noSpeedtest)
       setLiveJobId(jobId)
       await loadSessions()
     } catch (e) {
