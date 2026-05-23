@@ -697,7 +697,10 @@ fn print_aller_summary(report: &DiagnosticReport) {
             .find_map(|h| h.avg_rtt_ms().filter(|&v| v > 0.0))
             .map(|v| format!("{:.0}ms", v))
             .unwrap_or_else(|| "—".into());
-        let max_loss = report.hops.iter().map(|h| h.loss_pct()).fold(0.0f64, f64::max);
+        let max_loss = report.hops.iter()
+            .filter(|h| !h.suspected_icmp_ratelimit)
+            .map(|h| h.loss_pct())
+            .fold(0.0f64, f64::max);
         let dl = report.speedtests.iter().map(|s| s.download_mbps).fold(0.0f64, f64::max);
         let dl_str = if dl > 0.0 { format!(", {:.0} Mbps↓", dl) } else { "".into() };
         format!("RTT moy {}, {:.1}% perte{}", avg_rtt, max_loss, dl_str)
