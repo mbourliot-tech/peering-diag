@@ -5,7 +5,7 @@
 //! qui se connectent après le démarrage.
 
 use anyhow::{anyhow, Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 const MAX_CONCURRENT_JOBS: usize = 8;
 const JOB_TIMEOUT_SECS:    u64   = 600; // 10 min
+const LINE_BUFFER_CAP:     usize = 5_000;
 
 // ─── État d'un job ────────────────────────────────────────────────────────────
 
@@ -37,8 +38,9 @@ pub struct JobInfo {
 pub struct Job {
     pub id:      Uuid,
     pub command: String,
-    // Lignes déjà produites (pour les clients qui se connectent en retard)
-    pub lines:   Arc<RwLock<Vec<String>>>,
+    // Lignes déjà produites (pour les clients qui se connectent en retard).
+    // Bornée à LINE_BUFFER_CAP : les plus anciennes sont droppées en tête.
+    pub lines:   Arc<RwLock<VecDeque<String>>>,
     // Canal broadcast pour les lignes nouvelles (vrai temps réel)
     pub tx:      broadcast::Sender<String>,
     pub status:  Arc<RwLock<JobStatus>>,
@@ -57,7 +59,7 @@ impl Job {
         Self {
             id,
             command: command.into(),
-            lines:   Arc::new(RwLock::new(Vec::new())),
+            lines:   Arc::new(RwLock::new(VecDeque::new())),
             tx,
             status:  Arc::new(RwLock::new(JobStatus::Running)),
             done,
@@ -249,7 +251,12 @@ impl Job {
         let line  = clean.trim_end().to_string();
         if line.is_empty() { return; }
 
-        self.lines.write().await.push(line.clone());
+        let mut lines = self.lines.write().await;
+        if lines.len() >= LINE_BUFFER_CAP {
+            lines.pop_front();
+        }
+        lines.push_back(line.clone());
+        drop(lines);
         // Ignorer l'erreur si aucun récepteur
         let _ = self.tx.send(line);
     }
