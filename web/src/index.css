@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: clamp(15px, 0.5vw + 13px, 18px); }
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: #060b14;
+  color: #e2e8f0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar élégante */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #2563eb; }
+
+/* Focus ring global sur les inputs */
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
+  border-color: #3b82f6 !important;
+}

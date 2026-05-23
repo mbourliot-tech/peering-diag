@@ -1,0 +1,67 @@
+[package]
+name = "peering-diag"
+version = "0.1.0"
+edition = "2021"
+description = "Outil de diagnostic de peering : MTR AS-aware + speedtest segmenté"
+authors = ["Michel"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# HTTP / API
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Sérialisation
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Erreurs / logs
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Réseau bas niveau
+socket2 = { version = "0.5", features = ["all"] }
+hickory-resolver = "0.24"
+rand = "0.8"
+
+# Cache async
+moka = { version = "0.12", features = ["future"] }
+
+# UI terminal
+indicatif = "0.17"
+comfy-table = "7"
+colored = "2"
+
+# Stockage
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+# Stats
+statrs = "0.16"
+
+# Dates
+chrono = { version = "0.4", features = ["serde"] }
+
+# Serveur web
+axum             = { version = "0.7", features = ["macros"] }
+tower            = "0.4"
+tower-http       = { version = "0.5", features = ["fs", "cors"] }
+tokio-stream     = "0.1"
+uuid             = { version = "1", features = ["v4", "serde"] }
+strip-ansi-escapes = "0.2"
+async-stream     = "0.3"
+
+[[bin]]
+name = "peering-diag"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
