@@ -522,24 +522,28 @@ fn check_speedtest_drop(speedtests: &[SpeedtestResult]) -> Vec<Finding> {
         }
 
         // Débit faible en absolu (même sans comparaison)
-        if cur.download_mbps < 10.0 {
+        if cur.download_mbps < 1.0 {
+            let dl_str = if cur.download_mbps < 0.001 {
+                format!("{:.0} Kbps", cur.download_mbps * 1000.0)
+            } else {
+                format!("{:.0} Kbps", cur.download_mbps * 1000.0)
+            };
             findings.push(Finding {
                 severity: Severity::Critical,
                 category: FindingCategory::PeeringCongestion,
                 description: format!(
-                    "Débit très faible vers {} : {:.1} Mbps",
+                    "Débit très faible vers {} : {}",
                     cur.as_name.as_deref().unwrap_or("?"),
-                    cur.download_mbps
+                    dl_str
                 ),
                 evidence: format!(
-                    "{:.1} Mbps mesuré vers {} (AS{}). \
-                     En dessous de 10 Mbps, les transferts seront très lents.",
-                    cur.download_mbps,
+                    "{} mesuré vers {} (AS{}).",
+                    dl_str,
                     cur.server_name,
                     cur.asn.unwrap_or(0)
                 ),
                 action: Some(
-                    "Débit insuffisant pour un usage normal. \
+                    "Débit insuffisant — inférieur à 1 Mbps. \
                      Vérifier si la limitation vient du lien, du serveur Speedtest ou du peering.".to_string()
                 ),
             });
