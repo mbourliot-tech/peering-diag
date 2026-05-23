@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: cd web && npm ci && npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist/
+
+  build-windows:
+    needs: build-frontend
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            peering-diag/target
+          key: windows-cargo-${{ hashFiles('peering-diag/Cargo.lock') }}
+      - run: cargo build --release --manifest-path peering-diag/Cargo.toml
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist/
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path pkg
+          Copy-Item peering-diag/target/release/peering-diag.exe pkg/
+          Copy-Item -Recurse web/dist pkg/dist
+          Compress-Archive -Path pkg/* -DestinationPath peering-diag-win64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peering-diag-win64
+          path: peering-diag-win64.zip
+
+  build-linux:
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            peering-diag/target
+          key: linux-cargo-${{ hashFiles('peering-diag/Cargo.lock') }}
+      - run: cargo build --release --manifest-path peering-diag/Cargo.toml
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist/
+      - name: Package
+        run: |
+          mkdir pkg
+          cp peering-diag/target/release/peering-diag pkg/
+          cp -r web/dist pkg/dist
+          tar -czf peering-diag-linux64.tar.gz -C pkg .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peering-diag-linux64
+          path: peering-diag-linux64.tar.gz
+
+  release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: peering-diag-win64
+      - uses: actions/download-artifact@v4
+        with:
+          name: peering-diag-linux64
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            peering-diag-win64.zip
+            peering-diag-linux64.tar.gz
+          generate_release_notes: true

@@ -6,8 +6,8 @@ description = "Outil de diagnostic de peering : MTR AS-aware, speedtest segment√
 authors = ["Michel"]
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/Michel/peering-diag"
-homepage = "https://github.com/Michel/peering-diag"
+repository = "https://github.com/mbourliot-tech/peering-diag"
+homepage = "https://github.com/mbourliot-tech/peering-diag"
 keywords = ["network", "diagnostic", "mtr", "traceroute", "peering"]
 categories = ["command-line-utilities", "network-programming"]
 
