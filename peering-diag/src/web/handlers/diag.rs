@@ -37,7 +37,7 @@ pub async fn start_job(
     let args = build_args(&req.command, &req.args)?;
 
     // Seules ces commandes acceptent --db
-    const DB_COMMANDS: &[&str] = &["diag", "aller", "mtr", "watch"];
+    const DB_COMMANDS: &[&str] = &["diag", "aller", "watch"];
     let db_path = if DB_COMMANDS.contains(&req.command.as_str()) {
         Some(state.db_path.clone())
     } else {
