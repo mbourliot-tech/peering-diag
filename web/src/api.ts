@@ -78,12 +78,65 @@ export async function getJobStatus(id: string): Promise<JobInfo> {
   return res.json()
 }
 
-export function streamJob(id: string, onLine: (line: string) => void, onDone: () => void): () => void {
-  const es = new EventSource(`${BASE}/jobs/${id}/stream`)
-  es.onmessage = (e) => onLine(e.data)
-  es.addEventListener('done', () => { es.close(); onDone() })
-  es.onerror = () => { es.close(); onDone() }
-  return () => es.close()
+const SSE_RETRY_DELAYS = [1_000, 2_000, 4_000, 8_000, 16_000] // ms
+
+export function streamJob(
+  id: string,
+  onLine: (line: string) => void,
+  onDone: () => void,
+): () => void {
+  let es:           EventSource | null = null
+  let retryTimer:   ReturnType<typeof setTimeout> | null = null
+  let stopped       = false
+  let attempt       = 0
+  let linesReceived = 0   // lignes déjà transmises à onLine
+
+  function connect() {
+    if (stopped) return
+
+    // Sur reconnexion, le serveur rejoue tout le buffer.
+    // On saute les lignes déjà vues pour éviter les doublons.
+    let skipRemaining = linesReceived
+
+    es = new EventSource(`${BASE}/jobs/${id}/stream`)
+
+    es.onmessage = (e) => {
+      attempt = 0                      // réinitialise le backoff sur message reçu
+      if (skipRemaining > 0) { skipRemaining--; return }
+      linesReceived++
+      onLine(e.data)
+    }
+
+    es.addEventListener('done', () => {
+      stopped = true
+      es?.close()
+      onDone()
+    })
+
+    es.onerror = () => {
+      es?.close()
+      es = null
+      if (stopped) return
+
+      if (attempt >= SSE_RETRY_DELAYS.length) {
+        // Abandon après toutes les tentatives
+        stopped = true
+        onDone()
+        return
+      }
+      const delay = SSE_RETRY_DELAYS[attempt++]
+      retryTimer = setTimeout(connect, delay)
+    }
+  }
+
+  connect()
+
+  return () => {
+    stopped = true
+    if (retryTimer) clearTimeout(retryTimer)
+    es?.close()
+    es = null
+  }
 }
 
 export async function fetchHistory(params: { target?: string; last?: number; since?: string } = {}): Promise<RunJson[]> {
