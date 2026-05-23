@@ -242,8 +242,13 @@ async fn run_globalping_return(
                     .find(|h| h.avg_ms > 0.0)
                     .map(|h| format!("{:.0}ms", h.avg_ms))
                     .unwrap_or_else(|| "—".into());
-                let max_loss =
-                    trace.hops.iter().map(|h| h.loss_pct).fold(0.0f64, f64::max);
+                let icmp_rl_flags: Vec<bool> = (0..trace.hops.len())
+                    .map(|i| crate::lg::analyzer::is_suspected_ratelimit_pub(&trace.hops, i))
+                    .collect();
+                let max_loss = trace.hops.iter().zip(&icmp_rl_flags)
+                    .filter(|(_, &rl)| !rl)
+                    .map(|(h, _)| h.loss_pct)
+                    .fold(0.0f64, f64::max);
                 let (icon, label) = match verdict.status {
                     VerdictStatus::Healthy  => ("✔", "SAIN    "),
                     VerdictStatus::Degraded => ("⚠", "DÉGRADÉ "),

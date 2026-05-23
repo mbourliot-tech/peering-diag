@@ -35,6 +35,10 @@ pub fn analyze_return(hops: &[MtrHop]) -> (Vec<Finding>, Verdict) {
 
 /// Retourne true si la perte au hop `idx` est probablement du filtrage ICMP :
 /// du trafic continue de passer (un hop suivant répond avec bien moins de perte).
+pub fn is_suspected_ratelimit_pub(hops: &[MtrHop], idx: usize) -> bool {
+    is_suspected_ratelimit(hops, idx)
+}
+
 fn is_suspected_ratelimit(hops: &[MtrHop], idx: usize) -> bool {
     let loss = hops[idx].loss_pct;
     if loss < 1.0 {
@@ -223,11 +227,15 @@ fn check_bufferbloat(hops: &[MtrHop], icmp_rl: &[bool]) -> Vec<Finding> {
     let mut findings = Vec::new();
 
     for (i, hop) in hops.iter().enumerate() {
-        if icmp_rl[i] || hop.snt < 5 || hop.min_ms < 1.0 || hop.max_ms == 0.0 {
+        if icmp_rl[i] || hop.snt < 5 || hop.min_ms < 10.0 || hop.max_ms == 0.0 {
             continue;
         }
         let ratio = hop.max_ms / hop.min_ms;
-        if ratio < 5.0 {
+        let absolute_jump = hop.max_ms - hop.min_ms;
+        // Mêmes gardes que is_bufferbloated() côté aller :
+        // min_ms >= 10ms et saut absolu > 80ms évitent les faux positifs
+        // sur chemins courts (variation ICMP naturelle sur 5 rounds).
+        if ratio < 5.0 || absolute_jump < 80.0 {
             continue;
         }
 
@@ -597,14 +605,25 @@ fn is_transatlantic(hops: &[MtrHop]) -> bool {
     })
 }
 
+/// Vérifie si `code` apparaît comme segment isolé dans le hostname
+/// (séparé par `.`, `-` ou `_`), pour éviter les faux positifs :
+/// "fra" dans "infra" ou "france" ne doit pas être détecté comme Frankfurt.
+fn hostname_has_code(hostname: &str, code: &str) -> bool {
+    hostname
+        .split(|c: char| c == '.' || c == '-' || c == '_')
+        .any(|seg| seg == code)
+}
+
 fn detect_geo_detour(hops: &[MtrHop]) -> Option<(String, String, String)> {
     let geo: Vec<(usize, &str)> = hops.iter().enumerate().filter_map(|(i, h)| {
         let name = h.host.as_ref()?;
         let l = name.to_lowercase();
         let city = if l.contains("paris") || l.contains("pvu") || l.contains("pye") { "Paris" }
             else if l.contains("london") || l.contains("ldn") || l.contains("lhr") { "Londres" }
-            else if l.contains("frankfurt") || l.contains("fra") { "Frankfurt" }
-            else if l.contains("amsterdam") || l.contains("ams") { "Amsterdam" }
+            // "fra" seul (code aéroport FRA) mais pas "infra", "france", "infra-" etc.
+            else if l.contains("frankfurt") || hostname_has_code(&l, "fra") { "Frankfurt" }
+            // "ams" seul mais pas "amsterdam" déjà couvert, ni d'autres mots contenant "ams"
+            else if l.contains("amsterdam") || hostname_has_code(&l, "ams") { "Amsterdam" }
             else if l.contains("newark") || l.contains("njy") { "Newark" }
             else if l.contains("newyork") || l.contains("nto") { "New York" }
             else if l.contains("ashburn") { "Ashburn" }
