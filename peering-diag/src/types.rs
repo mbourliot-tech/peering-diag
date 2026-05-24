@@ -26,10 +26,18 @@ pub struct Hop {
     pub primary_ip: Option<IpAddr>,
     pub hostname: Option<String>,
     pub as_info: Option<AsInfo>,
+    #[serde(serialize_with = "serialize_durations_as_ms")]
     pub rtt_samples: Vec<Duration>,
     pub sent: u32,
     pub received: u32,
     pub suspected_icmp_ratelimit: bool,
+}
+
+fn serialize_durations_as_ms<S>(v: &[Duration], s: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    s.collect_seq(v.iter().map(|d| d.as_secs_f64() * 1000.0))
 }
 
 impl Hop {

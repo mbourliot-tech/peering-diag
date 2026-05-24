@@ -11,7 +11,7 @@ pub mod globalping;
 pub mod myip;
 pub mod query;
 
-pub use engine::{run_lg, run_retour};
+pub use engine::{collect_retour_json, run_lg, run_retour};
 pub use myip::get_public_ip;
 
 use anyhow::{Context, Result};

@@ -9,7 +9,7 @@ use peering_diag::{
     mtr::{
         detect_ecmp_imbalance, explore_ecmp_to_target, EcmpExploreConfig, Mtr, MtrConfig,
     },
-    report::{display::print_report, export_json, init_db, maintenance, store_report, store_watch_series},
+    report::{display::print_report, export_json, init_db, maintenance, store_report, store_watch_series, DiagJson, EcmpJson},
     speedtest::cascade::build_geo_servers,
     speedtest::{
         check_iperf3, check_speedtest_cli, fetch_all_servers,
@@ -22,6 +22,13 @@ use std::collections::BTreeSet;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+#[derive(clap::ValueEnum, Clone, Copy, Default, PartialEq, Eq)]
+enum OutputFormat {
+    #[default]
+    Text,
+    Json,
+}
 
 #[derive(Parser)]
 #[command(
@@ -57,6 +64,9 @@ enum Command {
         /// IP publique locale (détectée automatiquement si absent)
         #[arg(long)]
         my_ip: Option<String>,
+        /// Format de sortie : text (défaut) ou json (stdout machine-readable)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
     /// Diagnostic du chemin aller uniquement (MTR AS-aware + speedtests + analyse)
     Aller {
@@ -75,6 +85,9 @@ enum Command {
         db: Option<PathBuf>,
         #[arg(long, default_value_t = 5)]
         max_speedtests: usize,
+        /// Format de sortie : text (défaut) ou json (stdout machine-readable)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
     /// Diagnostic du chemin retour uniquement (Globalping multi-rounds depuis la destination)
     Retour {
@@ -83,6 +96,9 @@ enum Command {
         /// IP publique locale (détectée automatiquement si absent)
         #[arg(long)]
         my_ip: Option<String>,
+        /// Format de sortie : text (défaut) ou json (stdout machine-readable)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
     /// Lance uniquement le MTR (sans speedtests ni retour)
     Mtr {
@@ -91,6 +107,9 @@ enum Command {
         rounds: u32,
         #[arg(long, default_value_t = 30)]
         max_hops: u8,
+        /// Format de sortie : text (défaut) ou json (stdout machine-readable)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
     /// Explore les chemins ECMP vers une cible (sonde TCP par port de service)
     Ecmp {
@@ -103,6 +122,9 @@ enum Command {
         probes: u32,
         #[arg(long, default_value_t = 64)]
         ttl: u8,
+        /// Format de sortie : text (défaut) ou json (stdout machine-readable)
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
     /// Chemin retour Globalping + URLs Looking Glass manuelles
     Lg {
@@ -204,16 +226,16 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     println!("{}", format!("peering-diag v{}", env!("CARGO_PKG_VERSION")).dimmed());
     match cli.command {
-        Command::Diag { target, rounds, probes, max_hops, no_speedtest, json, db, max_speedtests, my_ip } =>
-            run_diag(&target, rounds, probes, max_hops, no_speedtest, json, db, max_speedtests, my_ip.as_deref()).await,
-        Command::Aller { target, rounds, probes, max_hops, no_speedtest, json, db, max_speedtests } =>
-            run_aller(&target, rounds, probes, max_hops, no_speedtest, json, db, max_speedtests).await,
-        Command::Retour { target, my_ip } =>
-            run_retour_cmd(&target, my_ip.as_deref()).await,
-        Command::Mtr { target, rounds, max_hops } =>
-            run_mtr_only(&target, rounds, max_hops).await,
-        Command::Ecmp { target, port, flows, probes, ttl } =>
-            run_ecmp(&target, port, flows, probes, ttl).await,
+        Command::Diag { target, rounds, probes, max_hops, no_speedtest, json, db, max_speedtests, my_ip, format } =>
+            run_diag(&target, rounds, probes, max_hops, no_speedtest, json, db, max_speedtests, my_ip.as_deref(), format).await,
+        Command::Aller { target, rounds, probes, max_hops, no_speedtest, json, db, max_speedtests, format } =>
+            run_aller(&target, rounds, probes, max_hops, no_speedtest, json, db, max_speedtests, format).await,
+        Command::Retour { target, my_ip, format } =>
+            run_retour_cmd(&target, my_ip.as_deref(), format).await,
+        Command::Mtr { target, rounds, max_hops, format } =>
+            run_mtr_only(&target, rounds, max_hops, format).await,
+        Command::Ecmp { target, port, flows, probes, ttl, format } =>
+            run_ecmp(&target, port, flows, probes, ttl, format).await,
         Command::Lg { target, my_ip } =>
             run_lg_cmd(&target, my_ip.as_deref()).await,
         Command::History { db, target, last, since, by_hour, hop, run } =>
@@ -249,9 +271,16 @@ async fn run_diag(
     db_path: Option<PathBuf>,
     max_speedtests: usize,
     my_ip_str: Option<&str>,
+    format: OutputFormat,
 ) -> Result<()> {
-    // Détection IP publique en premier (nécessaire pour la phase retour)
     let my_ip = resolve_my_ip(my_ip_str).await?;
+
+    if format == OutputFormat::Json {
+        let (_, aller) = run_aller_inner(target, rounds, probes, max_hops, no_speedtest, None, None, max_speedtests, true, None).await?;
+        let retour = peering_diag::lg::collect_retour_json(target, my_ip).await.ok();
+        println!("{}", serde_json::to_string_pretty(&DiagJson { aller, retour })?);
+        return Ok(());
+    }
 
     // ── Phase 1 : chemin aller ─────────────────────────────────────────────
     println!(
@@ -300,7 +329,13 @@ async fn run_aller(
     json_path: Option<PathBuf>,
     db_path: Option<PathBuf>,
     max_speedtests: usize,
+    format: OutputFormat,
 ) -> Result<()> {
+    if format == OutputFormat::Json {
+        let (_, report) = run_aller_inner(target, rounds, probes, max_hops, no_speedtest, None, None, max_speedtests, true, None).await?;
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
     run_aller_inner(target, rounds, probes, max_hops, no_speedtest, json_path, db_path, max_speedtests, false, None).await?;
     Ok(())
 }
@@ -319,25 +354,28 @@ async fn run_aller_inner(
     watch_series_id: Option<i64>,
 ) -> Result<(Option<i64>, DiagnosticReport)> {
     let target_ip = resolve_target(target).await?;
-    println!("{} {} ({})", "Cible :".bold(), target, target_ip.to_string().dimmed());
+    if !quiet {
+        println!("{} {} ({})", "Cible :".bold(), target, target_ip.to_string().dimmed());
+    }
 
     let asn_resolver = Arc::new(AsnResolver::new());
     let target_as = asn_resolver.lookup(target_ip).await?;
-    if let Some(ref a) = target_as { println!("AS cible : {}", a.display()); }
-    println!();
-
-    println!("{}", "▶ MTR AS-aware".bold().cyan());
+    if !quiet {
+        if let Some(ref a) = target_as { println!("AS cible : {}", a.display()); }
+        println!();
+        println!("{}", "▶ MTR AS-aware".bold().cyan());
+    }
     let mtr = Mtr::new(
         MtrConfig { target: target_ip, rounds, max_hops, probes_per_round: probes, ..Default::default() },
         asn_resolver.clone(),
     );
     let hops = mtr.run().await?;
-    println!();
+    if !quiet { println!(); }
 
     let speedtests = if no_speedtest {
         Vec::new()
     } else {
-        match run_cascade_speedtests(&hops, asn_resolver.clone(), max_speedtests).await {
+        match run_cascade_speedtests(&hops, asn_resolver.clone(), max_speedtests, quiet).await {
             Ok(r) => r,
             Err(e) => { eprintln!("{} speedtests : {}", "✖".red(), e); Vec::new() }
         }
@@ -367,16 +405,23 @@ async fn run_aller_inner(
 
 // ─── Commande retour ──────────────────────────────────────────────────────────
 
-async fn run_retour_cmd(target: &str, my_ip_str: Option<&str>) -> Result<()> {
+async fn run_retour_cmd(target: &str, my_ip_str: Option<&str>, format: OutputFormat) -> Result<()> {
     let my_ip = resolve_my_ip(my_ip_str).await?;
+    if format == OutputFormat::Json {
+        let retour = peering_diag::lg::collect_retour_json(target, my_ip).await?;
+        println!("{}", serde_json::to_string_pretty(&retour)?);
+        return Ok(());
+    }
     peering_diag::lg::run_retour(target, my_ip, None, false).await
 }
 
 // ─── Commande mtr (inchangée) ─────────────────────────────────────────────────
 
-async fn run_mtr_only(target: &str, rounds: u32, max_hops: u8) -> Result<()> {
+async fn run_mtr_only(target: &str, rounds: u32, max_hops: u8, format: OutputFormat) -> Result<()> {
     let target_ip = resolve_target(target).await?;
-    println!("Cible : {} ({})", target.bold(), target_ip.to_string().dimmed());
+    if format == OutputFormat::Text {
+        println!("Cible : {} ({})", target.bold(), target_ip.to_string().dimmed());
+    }
     let asn_resolver = Arc::new(AsnResolver::new());
     let mtr = Mtr::new(
         MtrConfig { target: target_ip, rounds, max_hops, ..Default::default() },
@@ -385,7 +430,11 @@ async fn run_mtr_only(target: &str, rounds: u32, max_hops: u8) -> Result<()> {
     let hops = mtr.run().await?;
     let target_as = asn_resolver.lookup(target_ip).await?;
     let report = DiagnosticReport::build(target.to_string(), target_ip, target_as, hops, vec![]);
-    print_report(&report);
+    if format == OutputFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print_report(&report);
+    }
     Ok(())
 }
 
@@ -398,8 +447,30 @@ async fn run_lg_cmd(target: &str, my_ip_str: Option<&str>) -> Result<()> {
 
 // ─── Commande ecmp (inchangée) ────────────────────────────────────────────────
 
-async fn run_ecmp(target: &str, port: u16, flows: u16, probes: u32, ttl: u8) -> Result<()> {
+async fn run_ecmp(target: &str, port: u16, flows: u16, probes: u32, ttl: u8, format: OutputFormat) -> Result<()> {
     let target_ip = resolve_target(target).await?;
+
+    let cfg = EcmpExploreConfig {
+        target: target_ip,
+        dst_port: port,
+        flows,
+        probes_per_flow: probes,
+        ttl,
+        timeout: std::time::Duration::from_secs(2),
+    };
+
+    if format == OutputFormat::Json {
+        let stats = explore_ecmp_to_target(&cfg).await;
+        let imbalance = detect_ecmp_imbalance(&stats);
+        println!("{}", serde_json::to_string_pretty(&EcmpJson {
+            target: target.to_string(),
+            dst_port: port,
+            flows: stats,
+            imbalance,
+        })?);
+        return Ok(());
+    }
+
     println!(
         "{} {} ({}) port {}",
         "Cible :".bold(), target, target_ip.to_string().dimmed(), port
@@ -410,14 +481,6 @@ async fn run_ecmp(target: &str, port: u16, flows: u16, probes: u32, ttl: u8) -> 
     );
     println!();
 
-    let cfg = EcmpExploreConfig {
-        target: target_ip,
-        dst_port: port,
-        flows,
-        probes_per_flow: probes,
-        ttl,
-        timeout: std::time::Duration::from_secs(2),
-    };
     let stats = explore_ecmp_to_target(&cfg).await;
 
     println!("{:<8} {:>6} {:>8} {:>9} {:>9} {:>9}", "SrcPort", "Perte", "Min", "Médian", "Max", "Issue");
@@ -548,8 +611,11 @@ async fn run_cascade_speedtests(
     hops: &[Hop],
     asn_resolver: Arc<AsnResolver>,
     max_tests: usize,
+    quiet: bool,
 ) -> Result<Vec<SpeedtestResult>> {
-    println!("{}", "▶ Speedtests (cascade multi-méthodes)".bold().cyan());
+    if !quiet {
+        println!("{}", "▶ Speedtests (cascade multi-méthodes)".bold().cyan());
+    }
 
     let speedtest_ok = check_speedtest_cli().await.is_ok();
     let iperf3_ok = check_iperf3().await;
@@ -632,7 +698,7 @@ async fn run_cascade_speedtests(
             tokio::time::sleep(COOLDOWN_BETWEEN_TESTS).await;
         }
     }
-    println!();
+    if !quiet { println!(); }
     Ok(results)
 }
 
