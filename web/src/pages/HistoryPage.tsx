@@ -4,12 +4,34 @@ import { VerdictBadge } from '../components/VerdictBadge'
 import { TrendChart, HourChart } from '../components/HistoryChart'
 import { HopChart } from '../components/HopChart'
 import { MapView } from '../components/MapView'
+import { KpiCard } from '../components/KpiCard'
+import { useTheme } from '../contexts/ThemeContext'
 import type { RunJson, HourStatJson, RunDetailJson } from '../api'
 
 type ViewMode = 'table' | 'by-hour'
 
 const inputCls = "bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-100 placeholder-slate-600 transition-all"
 const labelCls = "block text-sm font-medium text-slate-400 mb-1.5"
+
+function DashboardStats({ runs }: { runs: RunJson[] }) {
+  const healthy  = runs.filter(r => r.verdict === 'Healthy').length
+  const degraded = runs.filter(r => r.verdict === 'Degraded').length
+  const faulty   = runs.filter(r => r.verdict === 'Faulty').length
+  const avgRtt   = runs.filter(r => r.avg_rtt_ms > 0).reduce((s, r) => s + r.avg_rtt_ms, 0) /
+                   (runs.filter(r => r.avg_rtt_ms > 0).length || 1)
+  const healthPct = runs.length ? Math.round(healthy / runs.length * 100) : 0
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem' }}>
+      <KpiCard label="Total runs"   value={runs.length}            icon="📋" color="#f0f6fc"   accent="#475569" />
+      <KpiCard label="Sains"        value={`${healthPct}%`}        icon="✔"  color="#34d399"   accent="#10b981"
+        sub={`${healthy} / ${runs.length} runs`} />
+      <KpiCard label="Dégradés"     value={degraded}               icon="⚠"  color="#fbbf24"   accent="#f59e0b" />
+      <KpiCard label="Problèmes"    value={faulty}                 icon="✖"  color="#f87171"   accent="#ef4444" />
+      <KpiCard label="RTT moyen"    value={`${avgRtt.toFixed(0)} ms`} icon="⏱" color="#60a5fa" accent="#388bfd" />
+    </div>
+  )
+}
 
 export function HistoryPage() {
   const [target,  setTarget]  = useState('')
@@ -21,6 +43,9 @@ export function HistoryPage() {
   const [hours,   setHours]   = useState<HourStatJson[]>([])
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState('')
+
+  const { theme } = useTheme()
+  const isDash    = theme === 'dashboard'
 
   const [openId,  setOpenId]  = useState<number | null>(null)
   const [detail,  setDetail]  = useState<RunDetailJson | null>(null)
@@ -81,22 +106,26 @@ export function HistoryPage() {
         <p className="text-slate-500 mt-1">Consultez et analysez tous les runs passés.</p>
       </div>
 
-      {/* Stats rapides (si données chargées) */}
+      {/* Stats rapides */}
       {runs.length > 0 && view === 'table' && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: 'Total runs',  value: runs.length,          color: 'text-slate-300', bg: 'from-slate-800 to-slate-900' },
-            { label: '✔ Sains',    value: healthy,               color: 'text-emerald-400', bg: 'from-emerald-900/20 to-slate-900' },
-            { label: '⚠ Dégradés', value: degraded,             color: 'text-yellow-400', bg: 'from-yellow-900/20 to-slate-900' },
-            { label: 'RTT moyen',   value: `${avgRtt.toFixed(0)} ms`, color: 'text-sky-400', bg: 'from-sky-900/20 to-slate-900' },
-          ].map(s => (
-            <div key={s.label} className={`rounded-2xl p-5 bg-gradient-to-b ${s.bg}`}
-              style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
-              <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
-              <div className="text-slate-500 text-sm mt-1">{s.label}</div>
+        isDash
+          ? <DashboardStats runs={runs} />
+          : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: 'Total runs',  value: runs.length,               color: 'text-slate-300',   bg: 'from-slate-800 to-slate-900' },
+                { label: '✔ Sains',    value: healthy,                    color: 'text-emerald-400', bg: 'from-emerald-900/20 to-slate-900' },
+                { label: '⚠ Dégradés', value: degraded,                  color: 'text-yellow-400',  bg: 'from-yellow-900/20 to-slate-900' },
+                { label: 'RTT moyen',   value: `${avgRtt.toFixed(0)} ms`, color: 'text-sky-400',     bg: 'from-sky-900/20 to-slate-900' },
+              ].map(s => (
+                <div key={s.label} className={`rounded-2xl p-5 bg-gradient-to-b ${s.bg}`}
+                  style={{ border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
+                  <div className="text-slate-500 text-sm mt-1">{s.label}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )
       )}
 
       {/* Filtres */}
