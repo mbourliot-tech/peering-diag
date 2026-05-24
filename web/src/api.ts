@@ -78,6 +78,10 @@ export async function getJobStatus(id: string): Promise<JobInfo> {
   return res.json()
 }
 
+export async function stopJob(id: string): Promise<void> {
+  await fetch(`${BASE}/jobs/${id}`, { method: 'DELETE' })
+}
+
 const SSE_RETRY_DELAYS = [1_000, 2_000, 4_000, 8_000, 16_000] // ms
 
 export function streamJob(

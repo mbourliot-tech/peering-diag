@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { startJob, fetchRunDetail } from '../api'
+import { startJob, stopJob, fetchRunDetail } from '../api'
 import { TerminalOutput } from '../components/TerminalOutput'
 import { HopChart } from '../components/HopChart'
 import type { RunDetailJson } from '../api'
@@ -179,25 +179,40 @@ export function DiagPage() {
           </div>
         )}
 
-        {/* Bouton */}
-        <button
-          onClick={handleStart}
-          disabled={running}
-          className="flex items-center gap-2.5 px-7 py-3 rounded-xl text-white font-semibold text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
-          style={running ? { background: '#1e3a5f' } : {
-            background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-            boxShadow: '0 4px 20px rgba(37,99,235,0.35)',
-          }}
-        >
-          {running ? (
-            <>
-              <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Diagnostic en cours…
-            </>
-          ) : (
-            <>▶ Lancer le diagnostic</>
+        {/* Boutons Lancer / Stop */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleStart}
+            disabled={running}
+            className="flex items-center gap-2.5 px-7 py-3 rounded-xl text-white font-semibold text-sm transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed shadow-lg"
+            style={running ? { background: '#1e3a5f' } : {
+              background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+              boxShadow: '0 4px 20px rgba(37,99,235,0.35)',
+            }}
+          >
+            {running ? (
+              <>
+                <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                En cours…
+              </>
+            ) : (
+              <>▶ Lancer le diagnostic</>
+            )}
+          </button>
+
+          {running && jobId && (
+            <button
+              onClick={async () => {
+                await stopJob(jobId)
+                setRunning(false)
+              }}
+              className="flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all"
+              style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171' }}
+            >
+              ■ Arrêter
+            </button>
           )}
-        </button>
+        </div>
       </div>
 
       {/* Terminal output */}

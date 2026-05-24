@@ -48,7 +48,7 @@ pub async fn run_serve(port: u16, db_path: PathBuf) -> Result<()> {
     let app = Router::new()
         // ── Jobs (commandes longues) ─────────────────────────────────────────
         .route("/api/jobs",              post(diag::start_job).get(diag::list_jobs))
-        .route("/api/jobs/:id",          get(diag::job_status))
+        .route("/api/jobs/:id",          get(diag::job_status).delete(diag::stop_job))
         .route("/api/jobs/:id/stream",   get(diag::job_stream_handler))
         // ── Historique ────────────────────────────────────────────────────────
         .route("/api/history",           get(history::list))
