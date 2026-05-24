@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, CircleMarker, Polyline, Popup } from 'react-le
 import 'leaflet/dist/leaflet.css'
 import { fetchRunMap, type MapHopJson, type MapRunJson } from '../api'
 
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+const TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
 const TILE_ATTR = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/attributions">CARTO</a>'
 
 function hopColor(loss: number | null, ratelimit: boolean): string {

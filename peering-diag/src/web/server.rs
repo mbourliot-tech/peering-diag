@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use axum::http::{header, HeaderValue, Method};
-use tower_http::{cors::CorsLayer, services::ServeDir};
+use tower_http::{cors::CorsLayer, services::{ServeDir, ServeFile}};
 
 use crate::web::{
     handlers::{db, diag, history, watch},
@@ -63,8 +63,11 @@ pub async fn run_serve(port: u16, db_path: PathBuf) -> Result<()> {
         .route("/api/db/stats",          get(db::stats))
         .route("/api/db/vacuum",         post(db::vacuum_db))
         .route("/api/db/purge",          post(db::purge))
-        // ── Frontend statique ─────────────────────────────────────────────────
-        .fallback_service(ServeDir::new(&frontend_dir))
+        // ── Frontend statique (fallback index.html pour React Router) ────────
+        .fallback_service(
+            ServeDir::new(&frontend_dir)
+                .fallback(ServeFile::new(frontend_dir.join("index.html")))
+        )
         .with_state(state.clone())
         .layer(
             CorsLayer::new()
