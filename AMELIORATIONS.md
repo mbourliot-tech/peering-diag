@@ -1,101 +1,82 @@
 # Pistes d'amélioration — peering-diag
 
-> Revue de code du 2026-05-23. Classé par priorité avec références fichier:ligne.
-> Top 3 par impact : **(1) tests**, **(2) timeout + limite jobs**, **(4) broadcast mort**.
+> Revue initiale : 2026-05-23. Mis à jour : 2026-05-24 (v0.2.0).
+> Items 1–5b, 8, 9, 10, 11 traités. Ce qui reste :
 
 ---
 
-## 🔴 Fiabilité (les plus impactantes)
+## ✅ Traités (v0.1.0 → v0.2.0)
 
-### 1. Zéro test, alors que la CI lance `cargo test`
-Aucun `#[test]` dans tout le projet. La CI (Sprint 3) passe « au vert » sans rien vérifier.
-Le code est bien structuré (`lib.rs` + `bin`) donc testable. Cibles faciles, fort ROI :
-- `report/maintenance.rs::human_bytes`
-- `report/history.rs::hour_from_ts`, `extract_verdict_finding`
-- `web/handlers/diag.rs::build_args` (tester la validation Sprint 2 : cible en `-`, commande hors whitelist)
-- `mtr/heuristics.rs` (logique de verdict — cœur métier)
-
-### 2. Aucun timeout ni limite de concurrence sur les jobs
-`web/jobs.rs::JobManager::spawn` — pas de borne : on peut lancer une infinité de
-sous-processus (chacun relance le binaire complet). Un `mtr` qui hang tourne indéfiniment.
-→ `tokio::sync::Semaphore` pour plafonner les jobs simultanés + timeout par job (`tokio::time::timeout`).
-
-### 3. Buffer de lignes non borné
-`web/jobs.rs`, champ `job.lines` — une session `watch` qui tourne des jours accumule
-toutes les lignes en mémoire sans limite.
-→ `VecDeque` avec cap (ex. 5000 lignes, drop des plus vieilles).
-⚠ Interagit avec le replay SSE par offset → prévoir un offset de base.
+| # | Description |
+|---|-------------|
+| 1 | 49 tests unitaires (maintenance, history, diag, db, heuristics) |
+| 2 | Timeout 10 min + Semaphore 8 jobs max |
+| 3 | Buffer lignes borné à 5000 (VecDeque) |
+| 4 | SSE temps réel via broadcast (suppression polling 150ms) |
+| 5 | `--format json` sur diag/aller/mtr/retour/ecmp |
+| 5b | Carte mondiale des hops (Leaflet + géoloc ip-api.com + toggles aller/retour) |
+| 8 | Cargo.lock versionné |
+| 9 | Error Boundary React |
+| 10 | Reconnexion SSE backoff exponentiel |
+| 11 | Bouton Stop pour tous les jobs web |
+| — | Double thème Terminal / Dashboard |
+| — | Liste déroulante cibles dans l'historique |
+| — | Fix F5 → 404 (fallback index.html) |
 
 ---
 
-## 🟠 Architecture
+## 🔴 Fonctionnalités majeures
 
-### 4. Le canal broadcast est du code mort
-`web/jobs.rs:39, 48, 208` — `broadcast::channel(256)` créé et `tx.send()` appelé à chaque
-ligne, mais `sse.rs` ignore le canal et fait du **polling toutes les 150 ms**.
-→ Latence ajoutée + CPU gaspillé + code trompeur.
-Refactor : le stream SSE rejoue le buffer puis `subscribe()` au broadcast → vrai temps réel,
-plus de polling.
+### (6) Support IPv6
+`mtr/probe.rs` — sockets en `Domain::IPV4` uniquement. Gros chantier structurant :
+- Nouveau socket ICMPv6
+- Résolution DNS préférant IPv6 si demandé (`--ipv6` flag)
+- Adaptation de l'affichage, DB et heuristiques
 
-### 5. Sortie 100 % texte → l'UI web reste un terminal
-214 `println!` (compromis assumé du subprocess). Pour une UI riche (hops interactifs, graphes
-en direct pendant le run), un mode `--format json` émettant des événements structurés par ligne
-permettrait au frontend de faire le rendu plutôt que d'afficher du texte ANSI strippé.
-
-### 5b. Carte mondiale des hops (dépend du point 5)
-Afficher la position géographique de chaque hop sur une carte interactive.
-- **Backend** : enrichir `AsInfo` avec `lat/lon` via ipinfo.io (déjà utilisé pour l'ASN fallback),
-  persister dans `hop_samples`. Endpoint `GET /api/history/run/:id/geo` pour les runs terminés.
-- **Frontend** : `react-leaflet` (Leaflet.js), polyligne entre hops, popup RTT/perte au clic.
-- **Phase 1 (sans point 5)** : carte sur l'historique uniquement (hops déjà en base) — faisable
-  en 1-2 jours.
-- **Phase 2 (avec point 5)** : carte temps réel pendant le run via événements JSON structurés.
+### (7) Alertes watch
+Aucune notification quand une session watch détecte un problème (`Degraded` ou `Faulty`).
+- Webhook configurable (POST JSON sur URL arbitraire)
+- Seuils configurables : perte > X%, RTT > Y ms
+- Optionnellement : email SMTP
 
 ---
 
-## 🟡 Fonctionnalités réseau
+## 🟠 Frontend — Dashboard incomplet
 
-### 6. Pas de support IPv6
-`mtr/probe.rs:62` (TODO), sockets en `Domain::IPV4`. Limitation réelle pour du diagnostic
-de peering moderne. Gros chantier mais structurant.
-
-### 7. Sockets RAW ICMP = privilèges requis
-`mtr/probe.rs:76` — `SOCK_RAW`/`ICMPV4` exige admin (Windows) / `CAP_NET_RAW` ou root (Linux).
-À vérifier : que `check-env` détecte le manque de privilèges et affiche un message clair
-plutôt qu'un échec cryptique.
+- `WatchPage`, `CheckEnvPage`, `DbPage` ignorent le thème dashboard (classes Tailwind hardcodées)
+- Transition visuelle abrupte lors du switch de thème (ajouter `transition: all 0.2s` global)
+- En mode dashboard, les KPI cards n'apparaissent pas si le run n'est pas stocké en DB
+  (`diag --format json` bypass la DB)
 
 ---
 
-## 🟢 Distribution / build
+## 🟡 Frontend — Carte
 
-### 8. `Cargo.lock` non versionné  ⟵ quick win (2 min)
-Confirmé absent du suivi git. Pour un **binaire**, `Cargo.lock` doit être commité
-(builds reproductibles, CI déterministe).
-→ Retirer du `.gitignore` et committer.
-
----
-
-## 🔵 Frontend
-
-### 9. Pas d'Error Boundary React
-Si une page lève une exception → écran blanc. Un `<ErrorBoundary>` autour du `<Suspense>`
-(dans `App.tsx`) afficherait un message propre.
-
-### 10. `EventSource` sans reconnexion maîtrisée
-`api.ts::streamJob` — `onerror` ferme direct. Une stratégie de backoff éviterait de perdre
-le flux sur micro-coupure.
-
-### 11. Pas de bouton Stop pour les jobs (diag, mtr, aller…)
-L'UI web n'a pas de moyen d'interrompre un run en cours (contrairement au CLI où Ctrl+C suffit).
-L'infrastructure est quasi prête :
-- `Job::kill()` existe dans `jobs.rs` — il manque juste `let _ = self.done.send(true)` pour signaler la fin au stream SSE.
-- Ajouter `DELETE /api/jobs/:id` (handler `stop_job` dans `diag.rs` + route dans `server.rs`).
-- `stopJob(id)` dans `api.ts` + bouton Stop dans `DiagPage.tsx` visible pendant `running === true`.
-Estimation : ~1h.
+- Le décalage de superposition (`0.004°`) est fixe — le rendre dynamique selon le zoom courant
+- Pas de zoom automatique pour englober tous les hops (centré sur le premier hop uniquement)
+- Optimisation mobile : carte difficilement utilisable sur petit écran
+- Carte pour les runs watch : les séries watch ne sont pas visualisables sur la carte
+  (endpoint `/api/watch/:id/map` manquant)
 
 ---
 
-## Ordre d'attaque suggéré
-1. **(8) Cargo.lock** — 2 min, débloque la reproductibilité
-2. **(1) base de tests** + **(2) borne sur les jobs** — rendent la CI réellement utile
-3. **(4) broadcast mort / vrai temps réel** — nettoie l'archi et améliore le SSE
+## 🟡 Frontend — Historique
+
+- Pagination réelle (actuellement juste un filtre "derniers N")
+- Export CSV/JSON de l'historique depuis l'interface
+
+---
+
+## 🟢 Backend — Dette technique
+
+- `detect_city_from_hops` et `detect_geo_hint` dupliqués dans `main.rs` et `lg/engine.rs`
+- `wrap_text` et `category_label` dupliqués dans `report/display.rs` et `lg/engine.rs`
+- Geo cache : pas d'éviction automatique des entrées de plus de 30 jours
+
+---
+
+## 🟢 Backend — Comportements à corriger
+
+- `diag --format json` bypass la DB même si `--db` est aussi passé
+- `watch` n'a pas de `--format json`
+- Si ip-api.com est indisponible, la géoloc échoue silencieusement (pas de retry ni fallback)
