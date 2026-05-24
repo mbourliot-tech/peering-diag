@@ -143,6 +143,12 @@ export function streamJob(
   }
 }
 
+export async function fetchTargets(): Promise<string[]> {
+  const res = await fetch(`${BASE}/history/targets`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function fetchHistory(params: { target?: string; last?: number; since?: string } = {}): Promise<RunJson[]> {
   const qs = new URLSearchParams()
   if (params.target) qs.set('target', params.target)

@@ -404,6 +404,29 @@ pub async fn run_map(
     Ok(Json(MapRunJson { id: run_id, timestamp: ts, target, aller, retour }))
 }
 
+// ─── GET /api/history/targets ────────────────────────────────────────────────
+
+pub async fn targets(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<String>>, AppError> {
+    let db_path = state.db_path.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<String>> {
+        let conn = init_db(&db_path)?;
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT target FROM reports ORDER BY target ASC"
+        )?;
+        let targets: Vec<String> = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(targets)
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(Json(result))
+}
+
 // ─── GET /api/history/hop/:filter ─────────────────────────────────────────────
 
 pub async fn hop(

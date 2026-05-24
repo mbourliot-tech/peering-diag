@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
-import { fetchHistory, fetchByHour, fetchRunDetail, fmtTs } from '../api'
+import { fetchHistory, fetchByHour, fetchRunDetail, fetchTargets, fmtTs } from '../api'
 import { VerdictBadge } from '../components/VerdictBadge'
 import { TrendChart, HourChart } from '../components/HistoryChart'
 import { HopChart } from '../components/HopChart'
@@ -47,6 +47,8 @@ export function HistoryPage() {
   const { theme } = useTheme()
   const isDash    = theme === 'dashboard'
 
+  const [targets, setTargets] = useState<string[]>([])
+
   const [openId,  setOpenId]  = useState<number | null>(null)
   const [detail,  setDetail]  = useState<RunDetailJson | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -71,6 +73,10 @@ export function HistoryPage() {
   }, [target, last, since, view])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    fetchTargets().then(setTargets).catch(() => {})
+  }, [])
 
   async function toggleDetail(id: number) {
     if (openId === id) { setOpenId(null); setDetail(null); return }
@@ -134,8 +140,11 @@ export function HistoryPage() {
         <div className="flex flex-wrap gap-4 items-end">
           <div>
             <label className={labelCls}>Cible</label>
-            <input type="text" value={target} onChange={e => setTarget(e.target.value)}
-              placeholder="Toutes" className={`${inputCls} w-44`} />
+            <select value={target} onChange={e => setTarget(e.target.value)}
+              className={`${inputCls} w-48`}>
+              <option value="">Toutes</option>
+              {targets.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
           <div>
             <label className={labelCls}>Derniers N</label>

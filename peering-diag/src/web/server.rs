@@ -52,6 +52,7 @@ pub async fn run_serve(port: u16, db_path: PathBuf) -> Result<()> {
         .route("/api/jobs/:id/stream",   get(diag::job_stream_handler))
         // ── Historique ────────────────────────────────────────────────────────
         .route("/api/history",           get(history::list))
+        .route("/api/history/targets",   get(history::targets))
         .route("/api/history/by-hour",   get(history::by_hour))
         .route("/api/history/run/:id",     get(history::run_detail))
         .route("/api/history/run/:id/map", get(history::run_map))
