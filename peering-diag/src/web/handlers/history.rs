@@ -297,6 +297,113 @@ pub async fn run_detail(
     Ok(Json(result))
 }
 
+// ─── GET /api/history/run/:id/map ────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct MapHopJson {
+    pub ttl:       i64,
+    pub ip:        Option<String>,
+    pub asn:       Option<i64>,
+    pub as_name:   Option<String>,
+    pub lat:       Option<f64>,
+    pub lon:       Option<f64>,
+    pub city:      Option<String>,
+    pub loss_pct:  Option<f64>,
+    pub avg_ms:    f64,
+    pub ratelimit: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MapRunJson {
+    pub id:        i64,
+    pub timestamp: String,
+    pub target:    String,
+    pub aller:     Vec<MapHopJson>,
+    pub retour:    Vec<MapHopJson>,
+}
+
+pub async fn run_map(
+    State(state): State<Arc<AppState>>,
+    Path(run_id): Path<i64>,
+) -> Result<Json<MapRunJson>, AppError> {
+    let db_path = state.db_path.clone();
+
+    // ── Lecture des hops depuis la DB ─────────────────────────────────────────
+    type AllerRow  = (i64, Option<String>, Option<i64>, Option<String>, Option<f64>, f64, bool);
+    type RetourRow = (i64, Option<String>, Option<i64>, Option<String>, Option<f64>, f64);
+
+    let (ts, target, aller_rows, retour_rows) = tokio::task::spawn_blocking(move || -> anyhow::Result<(String, String, Vec<AllerRow>, Vec<RetourRow>)> {
+        let conn = init_db(&db_path)?;
+
+        let (ts, target): (String, String) = conn.query_row(
+            "SELECT timestamp, target FROM reports WHERE id = ?1",
+            params![run_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).map_err(|_| anyhow::anyhow!("run #{} introuvable", run_id))?;
+
+        let mut s1 = conn.prepare("
+            SELECT ttl, ip, asn, as_name, loss_pct, COALESCE(avg_rtt_ms,0.0), suspected_ratelimit
+            FROM hop_samples WHERE report_id = ?1 ORDER BY ttl
+        ")?;
+        let aller: Vec<AllerRow> = s1.query_map(params![run_id], |r| Ok((
+            r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
+            r.get(4)?, r.get(5)?, r.get::<_, i32>(6)? != 0,
+        )))?.collect::<rusqlite::Result<_>>()?;
+
+        let mut s2 = conn.prepare("
+            SELECT ttl, ip, asn, as_name, loss_pct, COALESCE(avg_ms,0.0)
+            FROM return_hop_samples WHERE report_id = ?1 ORDER BY ttl
+        ")?;
+        let retour: Vec<RetourRow> = s2.query_map(params![run_id], |r| Ok((
+            r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
+            r.get(4)?, r.get(5)?,
+        )))?.collect::<rusqlite::Result<_>>()?;
+
+        Ok((ts, target, aller, retour))
+    })
+    .await
+    .map_err(|e| AppError::Internal(e.to_string()))?
+    .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // ── Collecte des IPs publiques uniques ────────────────────────────────────
+    let all_ips: Vec<String> = {
+        let mut seen = std::collections::HashSet::new();
+        aller_rows.iter()
+            .filter_map(|(_, ip, ..)| ip.clone())
+            .chain(retour_rows.iter().filter_map(|(_, ip, ..)| ip.clone()))
+            .filter(|ip| seen.insert(ip.clone()))
+            .collect()
+    };
+
+    // ── Géolocalisation ───────────────────────────────────────────────────────
+    let geo = crate::web::geo::geolocate_batch(all_ips, state.db_path.clone()).await;
+
+    // ── Construction de la réponse ────────────────────────────────────────────
+    let aller = aller_rows.into_iter().map(|(ttl, ip, asn, as_name, loss_pct, avg_ms, ratelimit)| {
+        let g = ip.as_ref().and_then(|i| geo.get(i));
+        MapHopJson {
+            ttl, ip, asn, as_name,
+            lat:      g.map(|g| g.lat),
+            lon:      g.map(|g| g.lon),
+            city:     g.and_then(|g| g.city.clone()),
+            loss_pct, avg_ms, ratelimit,
+        }
+    }).collect();
+
+    let retour = retour_rows.into_iter().map(|(ttl, ip, asn, as_name, loss_pct, avg_ms)| {
+        let g = ip.as_ref().and_then(|i| geo.get(i));
+        MapHopJson {
+            ttl, ip, asn, as_name,
+            lat:      g.map(|g| g.lat),
+            lon:      g.map(|g| g.lon),
+            city:     g.and_then(|g| g.city.clone()),
+            loss_pct, avg_ms, ratelimit: false,
+        }
+    }).collect();
+
+    Ok(Json(MapRunJson { id: run_id, timestamp: ts, target, aller, retour }))
+}
+
 // ─── GET /api/history/hop/:filter ─────────────────────────────────────────────
 
 pub async fn hop(

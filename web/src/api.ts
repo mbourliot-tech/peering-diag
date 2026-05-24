@@ -162,6 +162,33 @@ export async function fetchRunDetail(id: number): Promise<RunDetailJson> {
   return res.json()
 }
 
+export interface MapHopJson {
+  ttl:       number
+  ip:        string | null
+  asn:       number | null
+  as_name:   string | null
+  lat:       number | null
+  lon:       number | null
+  city:      string | null
+  loss_pct:  number | null
+  avg_ms:    number
+  ratelimit: boolean
+}
+
+export interface MapRunJson {
+  id:        number
+  timestamp: string
+  target:    string
+  aller:     MapHopJson[]
+  retour:    MapHopJson[]
+}
+
+export async function fetchRunMap(id: number): Promise<MapRunJson> {
+  const res = await fetch(`${BASE}/history/run/${id}/map`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function fetchWatchList(): Promise<WatchSeriesJson[]> {
   const res = await fetch(`${BASE}/watch`)
   if (!res.ok) throw new Error(await res.text())

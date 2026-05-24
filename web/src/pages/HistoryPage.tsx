@@ -3,6 +3,7 @@ import { fetchHistory, fetchByHour, fetchRunDetail, fmtTs } from '../api'
 import { VerdictBadge } from '../components/VerdictBadge'
 import { TrendChart, HourChart } from '../components/HistoryChart'
 import { HopChart } from '../components/HopChart'
+import { MapView } from '../components/MapView'
 import type { RunJson, HourStatJson, RunDetailJson } from '../api'
 
 type ViewMode = 'table' | 'by-hour'
@@ -24,6 +25,7 @@ export function HistoryPage() {
   const [openId,  setOpenId]  = useState<number | null>(null)
   const [detail,  setDetail]  = useState<RunDetailJson | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailTab, setDetailTab] = useState<'hops' | 'map'>('hops')
 
   const load = useCallback(async () => {
     setError('')
@@ -49,6 +51,7 @@ export function HistoryPage() {
     if (openId === id) { setOpenId(null); setDetail(null); return }
     setOpenId(id)
     setDetail(null)
+    setDetailTab('hops')
     setDetailLoading(true)
     try {
       const d = await fetchRunDetail(id)
@@ -214,16 +217,41 @@ export function HistoryPage() {
                                       📋 {r.finding}
                                     </div>
                                   )}
-                                  {detail.aller.length > 0
-                                    ? <HopChart hops={detail.aller} />
-                                    : <p className="text-slate-600 text-sm py-6 text-center">Pas de données hop disponibles</p>
-                                  }
-                                  {detail.retour.length > 0 && (
-                                    <div className="mt-6">
-                                      <h3 className="text-base font-semibold text-slate-300 mb-3">Retour (Globalping)</h3>
-                                      <HopChart hops={detail.retour} />
-                                    </div>
+
+                                  {/* Onglets Hops / Carte */}
+                                  <div className="flex gap-2 mb-4">
+                                    {(['hops', 'map'] as const).map(tab => (
+                                      <button
+                                        key={tab}
+                                        onClick={() => setDetailTab(tab)}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                          detailTab === tab
+                                            ? 'text-white'
+                                            : 'bg-slate-800/60 text-slate-400 border border-slate-700/60 hover:text-slate-200'
+                                        }`}
+                                        style={detailTab === tab ? { background: 'linear-gradient(135deg,#2563eb,#1d4ed8)', border: '1px solid #3b82f6' } : {}}
+                                      >
+                                        {tab === 'hops' ? '📊 Hops' : '🗺 Carte'}
+                                      </button>
+                                    ))}
+                                  </div>
+
+                                  {detailTab === 'hops' && (
+                                    <>
+                                      {detail.aller.length > 0
+                                        ? <HopChart hops={detail.aller} />
+                                        : <p className="text-slate-600 text-sm py-6 text-center">Pas de données hop disponibles</p>
+                                      }
+                                      {detail.retour.length > 0 && (
+                                        <div className="mt-6">
+                                          <h3 className="text-base font-semibold text-slate-300 mb-3">Retour (Globalping)</h3>
+                                          <HopChart hops={detail.retour} />
+                                        </div>
+                                      )}
+                                    </>
                                   )}
+
+                                  {detailTab === 'map' && <MapView runId={detail.id} />}
                                 </>
                               )}
                             </td>

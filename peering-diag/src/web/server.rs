@@ -53,7 +53,8 @@ pub async fn run_serve(port: u16, db_path: PathBuf) -> Result<()> {
         // ── Historique ────────────────────────────────────────────────────────
         .route("/api/history",           get(history::list))
         .route("/api/history/by-hour",   get(history::by_hour))
-        .route("/api/history/run/:id",   get(history::run_detail))
+        .route("/api/history/run/:id",     get(history::run_detail))
+        .route("/api/history/run/:id/map", get(history::run_map))
         .route("/api/history/hop/:filter", get(history::hop))
         // ── Watch ─────────────────────────────────────────────────────────────
         .route("/api/watch",             post(watch::start).get(watch::list))
