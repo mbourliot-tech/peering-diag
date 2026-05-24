@@ -205,6 +205,8 @@ export function DiagPage() {
               onClick={async () => {
                 await stopJob(jobId)
                 setRunning(false)
+                setJobId(null)
+                setDetail(null)
               }}
               className="flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-semibold transition-all"
               style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', color: '#f87171' }}
