@@ -42,6 +42,57 @@ pub async fn run_retour(
     run_globalping_return(&path_asns, &hops, my_ip, resolver, db, quiet).await
 }
 
+/// Collecte les données du chemin retour sans aucun affichage.
+/// Utilisé par `diag --format json` et `retour --format json`.
+pub async fn collect_retour_json(
+    target: &str,
+    my_ip: IpAddr,
+) -> Result<crate::report::RetourJson> {
+    let (resolver, path_asns, hops) = discover_path(target, my_ip, true).await?;
+
+    let dest_asn = path_asns.last().map(|(asn, _)| *asn);
+    let target_country = hops
+        .iter()
+        .rev()
+        .find_map(|h| h.as_info.as_ref().and_then(|a| a.country.clone()))
+        .unwrap_or_else(|| "US".to_string());
+    let city_hint = detect_city_from_hops(&hops);
+
+    let gp = GlobalpingClient::new();
+    let mut trace = gp
+        .traceroute_mtr(my_ip, dest_asn, city_hint.as_deref(), &target_country, 5)
+        .await?;
+
+    let ip_jobs: Vec<(usize, IpAddr)> = trace
+        .hops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, h)| h.ip.map(|ip| (i, ip)))
+        .collect();
+
+    let lookups: Vec<(usize, _)> = stream::iter(ip_jobs)
+        .map(|(i, ip)| {
+            let resolver = resolver.clone();
+            async move { (i, resolver.lookup(ip).await.ok().flatten()) }
+        })
+        .buffer_unordered(8)
+        .collect()
+        .await;
+
+    for (i, info) in lookups {
+        trace.hops[i].as_info = info;
+    }
+
+    let (findings, verdict) = analyze_return(&trace.hops);
+
+    Ok(crate::report::RetourJson {
+        probe: trace.probe,
+        hops: trace.hops,
+        findings,
+        verdict,
+    })
+}
+
 /// Diagnostic complet Looking Glass : chemin retour + URLs Looking Glass manuelles.
 /// Utilisé par la commande `lg`.
 pub async fn run_lg(

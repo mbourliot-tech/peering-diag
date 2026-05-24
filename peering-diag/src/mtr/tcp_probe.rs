@@ -18,6 +18,7 @@
 //! TCP des hops intermédiaires viendra avec pcap/Npcap (Phase B/C).
 
 use anyhow::{Context, Result};
+use serde::Serialize;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -39,7 +40,7 @@ pub struct TcpProbeConfig {
 }
 
 /// Issue d'une sonde TCP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum TcpOutcome {
     /// SYN-ACK reçu : port ouvert, cible atteinte.
     Open,
@@ -161,7 +162,7 @@ fn classify_connect_error(e: &io::Error, elapsed: Duration) -> (TcpOutcome, Opti
 // ═══════════════════════════════════════════════════════════
 
 /// Statistiques agrégées d'un flux (un port source = un chemin ECMP).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FlowStats {
     pub src_port: u16,
     pub sent: u32,
@@ -290,7 +291,7 @@ async fn run_flow(cfg: &EcmpExploreConfig, src_port: u16) -> FlowStats {
 }
 
 /// Verdict de déséquilibre ECMP.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EcmpImbalance {
     pub degraded_flows: usize,
     pub total_flows: usize,

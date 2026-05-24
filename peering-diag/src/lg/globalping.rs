@@ -59,7 +59,7 @@ struct ProbeResult {
     result: TraceResult,
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct ProbeInfo {
     pub country: String,
     pub city: String,
@@ -100,6 +100,7 @@ pub struct GlobalpingTrace {
 
 /// Un hop agrégé sur N rounds de traceroute (style MTR).
 /// `as_info` est initialement None — renseigné par engine.rs via AsnResolver.
+#[derive(Serialize)]
 pub struct MtrHop {
     pub ttl: u8,
     /// Hostname résolu (resolvedHostname).

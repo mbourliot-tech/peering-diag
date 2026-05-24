@@ -78,6 +78,10 @@ export async function getJobStatus(id: string): Promise<JobInfo> {
   return res.json()
 }
 
+export async function stopJob(id: string): Promise<void> {
+  await fetch(`${BASE}/jobs/${id}`, { method: 'DELETE' })
+}
+
 const SSE_RETRY_DELAYS = [1_000, 2_000, 4_000, 8_000, 16_000] // ms
 
 export function streamJob(
@@ -139,6 +143,12 @@ export function streamJob(
   }
 }
 
+export async function fetchTargets(): Promise<string[]> {
+  const res = await fetch(`${BASE}/history/targets`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function fetchHistory(params: { target?: string; last?: number; since?: string } = {}): Promise<RunJson[]> {
   const qs = new URLSearchParams()
   if (params.target) qs.set('target', params.target)
@@ -158,6 +168,33 @@ export async function fetchByHour(target?: string): Promise<HourStatJson[]> {
 
 export async function fetchRunDetail(id: number): Promise<RunDetailJson> {
   const res = await fetch(`${BASE}/history/run/${id}`)
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export interface MapHopJson {
+  ttl:       number
+  ip:        string | null
+  asn:       number | null
+  as_name:   string | null
+  lat:       number | null
+  lon:       number | null
+  city:      string | null
+  loss_pct:  number | null
+  avg_ms:    number
+  ratelimit: boolean
+}
+
+export interface MapRunJson {
+  id:        number
+  timestamp: string
+  target:    string
+  aller:     MapHopJson[]
+  retour:    MapHopJson[]
+}
+
+export async function fetchRunMap(id: number): Promise<MapRunJson> {
+  const res = await fetch(`${BASE}/history/run/${id}/map`)
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

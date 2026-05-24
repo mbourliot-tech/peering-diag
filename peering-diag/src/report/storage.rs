@@ -94,6 +94,16 @@ pub fn init_db(path: &Path) -> Result<Connection> {
             target     TEXT NOT NULL,
             interval_s INTEGER NOT NULL
         );
+
+        -- Cache de géolocalisation IP (ip-api.com, TTL 30 jours)
+        CREATE TABLE IF NOT EXISTS geo_cache (
+            ip         TEXT PRIMARY KEY,
+            lat        REAL NOT NULL,
+            lon        REAL NOT NULL,
+            city       TEXT,
+            country    TEXT,
+            cached_at  TEXT NOT NULL
+        );
         "#,
     )?;
     migrate_db(&conn)?;

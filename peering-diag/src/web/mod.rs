@@ -1,3 +1,4 @@
+pub mod geo;
 pub mod handlers;
 pub mod jobs;
 pub mod server;

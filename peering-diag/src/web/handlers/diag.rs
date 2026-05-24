@@ -136,6 +136,18 @@ pub async fn job_status(
     Ok(Json(job.info().await))
 }
 
+// ─── DELETE /api/jobs/:id ─────────────────────────────────────────────────────
+
+pub async fn stop_job(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let job = state.jobs.get(id).await.ok_or(AppError::NotFound)?;
+    job.kill().await;
+    state.jobs.remove(id).await;
+    Ok(Json(serde_json::json!({ "stopped": id })))
+}
+
 // ─── GET /api/jobs/:id/stream ─────────────────────────────────────────────────
 
 pub async fn job_stream_handler(
